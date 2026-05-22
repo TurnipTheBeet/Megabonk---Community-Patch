@@ -1,0 +1,9 @@
+{
+    "name": "MegaDuel",
+    "version_number": "1.1.0",
+    "website_url": "",
+    "description": "Community kill leaderboard, stat blacklists, item cap removal, and size cap removal.",
+    "dependencies": [
+        "BepInEx-BepInExPack_Megabonk-6.0.0"
+    ]
+}

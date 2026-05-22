@@ -1,0 +1,5 @@
+bin/
+obj/
+thunderstore/BepInEx/plugins/
+*.user
+.vs/
