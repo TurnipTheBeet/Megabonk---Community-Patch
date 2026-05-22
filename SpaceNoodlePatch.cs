@@ -2,110 +2,139 @@
 using HarmonyLib;
 using UnityEngine;
 using Assets.Scripts.Managers;
-using Assets.Scripts.Actors;
 using Assets.Scripts.Actors.Enemies;
-using Assets.Scripts.Menu.Shop;
 using Assets.Scripts.Inventory__Items__Pickups.Weapons;
 
 namespace MegaBonkMod;
 
-internal static class NoodleHelper
+internal static class FreeLaserHelper
 {
-    internal static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MBM.Noodle");
-
-    internal static bool IsDead(Enemy e)
+    // Use the same camera + layermask the shotgun/sniper use for their aim raycast
+    internal static Vector3 GetAimPoint(Vector3 fallback)
     {
-        if (e == null) return true;
-        unsafe { return *(bool*)(e.Pointer + 0x116) || *(bool*)(e.Pointer + 0x117); }
+        var cam = PlayerCamera.Instance?.camera;
+        if (cam == null) return fallback;
+
+        var ray  = cam.ScreenPointToRay(Input.mousePosition);
+        int mask = GameManager.Instance?.whatIsProjectileRaycast ?? -1;
+
+        return Physics.Raycast(ray, out RaycastHit hit, 1000f, mask)
+            ? hit.point
+            : fallback;
+    }
+
+    // GetBeamStart() = player world pos. Add chest offset.
+    internal static Vector3 GetMuzzlePos(LaserBeamAttack instance)
+    {
+        var player = GameManager.Instance?.player;
+        var origin = player != null
+            ? player.transform.position
+            : instance.transform.position;
+        return origin + Vector3.up * 1.2f;
     }
 }
 
-// ── StartLaser: 0.5s base duration, atk speed scales duration, 0.02s gap ─────
-[HarmonyPatch(typeof(LaserBeamAttack), "StartLaser")]
-static class Patch_Noodle_AttackSpeedDuration
+// ── Block auto-targeting ──────────────────────────────────────────────────────
+[HarmonyPatch(typeof(LaserBeamAttack), "FindTarget")]
+static class Patch_FreeLaser_FindTarget
 {
-    private const float BASE_DURATION = 0.5f;
-    private const float READY_GAP     = 0.02f;
+    static bool Prefix() => false;
+}
 
-    static void Postfix(LaserBeamAttack __instance)
+// ── Drive beam endpoint to aim point (used by FixedUpdate hit detection) ──────
+[HarmonyPatch(typeof(LaserBeamAttack), "GetBeamEnd")]
+static class Patch_FreeLaser_GetBeamEnd
+{
+    static bool Prefix(LaserBeamAttack __instance, ref Vector3 __result)
     {
-        var wb = __instance.weaponBase;
-        if (wb == null) return;
+        __result = FreeLaserHelper.GetAimPoint(
+            FreeLaserHelper.GetMuzzlePos(__instance));
+        return false;
+    }
+}
 
-        float baseCooldown;
-        unsafe { baseCooldown = *(float*)(wb.weaponData.Pointer + 0x9C); }
-        float actualCooldown = WeaponUtility.GetWeaponCooldown(wb);
-        float F = (actualCooldown > 0.001f) ? baseCooldown / actualCooldown : 1f;
+// ── Replace Update: manage isShooting + render beam toward aim point ──────────
+[HarmonyPatch(typeof(LaserBeamAttack), "Update")]
+static class Patch_FreeLaser_Update
+{
+    static bool Prefix(LaserBeamAttack __instance)
+    {
+        if (__instance.weaponBase == null || !__instance.enabled) return false;
+        if (Time.timeScale == 0f) return false; // paused
 
-        float duration     = Mathf.Max(0.01f, BASE_DURATION / F);
-        float now          = Time.time;
-        float newStopTime  = now + duration;
-        float newReadyTime = newStopTime + READY_GAP;
-
-        NoodleHelper.Log.LogInfo($"[Noodle] StartLaser: F={F:F2} dur={duration:F3}s stop={newStopTime:F3} ready={newReadyTime:F3}");
+        Vector3 startPos = FreeLaserHelper.GetMuzzlePos(__instance);
+        Vector3 aimPoint = FreeLaserHelper.GetAimPoint(startPos);
+        Vector3 dir      = (aimPoint - startPos).normalized;
 
         unsafe
         {
-            *(float*)(__instance.Pointer + 0x58) = newStopTime;
-            *(float*)(__instance.Pointer + 0x60) = newReadyTime;
+            bool isShooting = *(bool*)(__instance.Pointer + 0x64);
+            if (!isShooting)
+            {
+                *(bool*) (__instance.Pointer + 0x64) = true;
+                *(float*)(__instance.Pointer + 0x58) = Time.time + 999f;
+                *(float*)(__instance.Pointer + 0x5C) = Time.time;
+
+                *(float*)(__instance.Pointer + 0x68) = startPos.x;
+                *(float*)(__instance.Pointer + 0x6C) = startPos.y;
+                *(float*)(__instance.Pointer + 0x70) = startPos.z;
+                *(float*)(__instance.Pointer + 0x74) = aimPoint.x;
+                *(float*)(__instance.Pointer + 0x78) = aimPoint.y;
+                *(float*)(__instance.Pointer + 0x7C) = aimPoint.z;
+
+                if (__instance.linerenderer != null) __instance.linerenderer.enabled = true;
+                if (__instance.laserStart  != null) __instance.laserStart.SetActive(true);
+                if (__instance.laserEnd    != null) __instance.laserEnd.SetActive(true);
+            }
+
+            *(float*)(__instance.Pointer + 0x44) = dir.x;
+            *(float*)(__instance.Pointer + 0x48) = dir.y;
+            *(float*)(__instance.Pointer + 0x4C) = dir.z;
         }
+
+        if (__instance.laserStart != null)
+            __instance.laserStart.transform.position = startPos;
+        if (__instance.laserEnd != null)
+            __instance.laserEnd.transform.position = aimPoint;
+
+        if (__instance.linerenderer != null)
+        {
+            __instance.linerenderer.useWorldSpace = true;
+            __instance.linerenderer.positionCount = 2;
+            __instance.linerenderer.SetPosition(0, startPos);
+            __instance.linerenderer.SetPosition(1, aimPoint);
+        }
+
+        return false;
     }
 }
 
-// ── StopLaser: AoE finisher scaled by Size stat ───────────────────────────────
-[HarmonyPatch(typeof(LaserBeamAttack), "StopLaser")]
-static class Patch_Noodle_AoEFinisher
+// ── FixedUpdate: keep stopTime ahead + reset prevEnd to muzzle every tick ──────
+// Resetting prevEnd forces the native box cast to sweep the FULL beam (muzzle →
+// aim point) every physics tick, so enemies anywhere along the beam get hit.
+[HarmonyPatch(typeof(LaserBeamAttack), "FixedUpdate")]
+static class Patch_FreeLaser_FixedUpdate
 {
-    static nint _primaryPtr;
-
     static void Prefix(LaserBeamAttack __instance)
     {
-        unsafe { _primaryPtr = *(nint*)(__instance.Pointer + 0x50); }
-    }
-
-    static void Postfix(LaserBeamAttack __instance)
-    {
-        if (_primaryPtr == 0) return;
-
-        var wb = __instance.weaponBase;
-        if (wb == null) return;
-
-        float size     = wb.GetValue((EStat)9);
-        float radius   = 4f * size;
-        float duration = WeaponUtility.GetDuration(wb);
-
-        var primary       = new Enemy(_primaryPtr);
-        Vector3 center    = primary.transform.position;
-        Vector3 weaponPos = __instance.transform.position;
-
-        var em = EnemyManager.Instance;
-        if (em?.enemies == null) return;
-
-        int hits = 0;
-        foreach (var kvp in em.enemies)
+        if (__instance.weaponBase == null) return;
+        unsafe
         {
-            var e = kvp.Value;
-            if (e == null || e.Pointer == _primaryPtr) continue;
-            if (NoodleHelper.IsDead(e)) continue;
-            if (Vector3.Distance(center, e.transform.position) > radius) continue;
+            if (!*(bool*)(__instance.Pointer + 0x64)) return; // not shooting
 
-            Vector3 dir = (e.transform.position - weaponPos).normalized;
-            var dc = WeaponUtility.GetDamageContainer(wb, null, e, dir, -1f);
-            if (dc == null) continue;
+            *(float*)(__instance.Pointer + 0x58) = Time.time + 999f; // keep stopTime ahead
 
-            dc.damage *= duration;
+            // HitEnemy throws if target==null. Point target at the instance itself so:
+            // - target != 0 (no throw)
+            // - *(target+0x50) = 0 (null rigidbody) → rigidbody check fails → no enemy is skipped
+            if (*(nint*)(__instance.Pointer + 0x50) == 0)
+                *(nint*)(__instance.Pointer + 0x50) = __instance.Pointer;
 
-            unsafe
-            {
-                float hp    = *(float*)(e.Pointer + 0x80);
-                float newHp = Mathf.Max(0f, hp - dc.damage);
-                *(float*)(e.Pointer + 0x80) = newHp;
-                if (newHp <= 0f) e.DiedNextFrame();
-            }
-            hits++;
+            // Reset prevEnd to muzzle so native sweep covers muzzle → aim point
+            Vector3 muzzle = FreeLaserHelper.GetMuzzlePos(__instance);
+            *(float*)(__instance.Pointer + 0x74) = muzzle.x;
+            *(float*)(__instance.Pointer + 0x78) = muzzle.y;
+            *(float*)(__instance.Pointer + 0x7C) = muzzle.z;
         }
-
-        NoodleHelper.Log.LogInfo($"[Noodle] AoE: {hits} hits radius={radius:F1}");
     }
 }
