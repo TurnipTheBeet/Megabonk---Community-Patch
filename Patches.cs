@@ -923,6 +923,10 @@ static class Patch_LeaderboardUiNew_Start
     [HarmonyPostfix]
     static unsafe void Postfix(LeaderboardUiNew __instance)
     {
+        // Always hide the buffering spinner — we control when data shows
+        var bufPtr = *(System.IntPtr*)(__instance.Pointer + 0x30);
+        if (bufPtr != System.IntPtr.Zero) new GameObject(bufPtr).SetActive(false);
+
         if (!LeaderboardRelay.Enabled) return;
         var lbPtr = *(System.IntPtr*)(__instance.Pointer + 0x48);
         if (lbPtr == System.IntPtr.Zero) return;
@@ -1468,20 +1472,6 @@ static class Patch_MyTime_Update_ClockTimer
         if (inv?.statusEffects?.HasStatusEffect(EStatusEffect.TimeFreeze) ?? false)
             MyTime.stageTimer = _savedStageTimer;
     }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// LEADERBOARD UI — suppress Steam data while our server fetch is in progress
-// LeaderboardUiNew.OnLeaderboardReady hides the buffering spinner and renders
-// entries. Returning false here keeps the spinner visible until IsFetching=false,
-// at which point our Replace() fires A_LeaderboardReady again and it goes through.
-// ─────────────────────────────────────────────────────────────────
-
-[HarmonyPatch(typeof(LeaderboardUiNew), "OnLeaderboardReady")]
-static class Patch_LeaderboardUiNew_OnLeaderboardReady
-{
-    [HarmonyPrefix]
-    static bool Prefix() => !LeaderboardInjector.IsFetching;
 }
 
 // ─────────────────────────────────────────────────────────────────
