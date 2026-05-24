@@ -73,6 +73,35 @@ public class ModGui : MonoBehaviour
             }
         }
 
+        if (_promptVisible && !_authenticated)
+        {
+            foreach (char c in Input.inputString)
+            {
+                if (c == '\b')
+                {
+                    if (_passwordInput.Length > 0)
+                        _passwordInput = _passwordInput.Substring(0, _passwordInput.Length - 1);
+                }
+                else if (c == '\n' || c == '\r')
+                {
+                    if (_passwordInput == Password)
+                    {
+                        _authenticated = true;
+                        _promptVisible = false;
+                        _visible       = true;
+                    }
+                    else
+                    {
+                        _passwordInput = "";
+                    }
+                }
+                else
+                {
+                    _passwordInput += c;
+                }
+            }
+        }
+
         if (Input.GetKeyDown(KeyCode.F2) && !ChartDisabled)
             ToggleDamageChart();
 
@@ -181,23 +210,8 @@ public class ModGui : MonoBehaviour
             float px = (Screen.width  - pw) / 2f;
             float py = (Screen.height - ph) / 2f;
             GUI.Box(new Rect(px, py, pw, ph), "Mod Menu Password");
-            GUI.SetNextControlName("pwField");
-            _passwordInput = GUI.PasswordField(new Rect(px + 8f, py + 26f, pw - 16f, 22f), _passwordInput, '*', 32);
-            GUI.FocusControl("pwField");
-            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return)
-            {
-                if (_passwordInput == Password)
-                {
-                    _authenticated  = true;
-                    _promptVisible  = false;
-                    _visible        = true;
-                }
-                else
-                {
-                    _passwordInput = "";
-                }
-            }
-            GUI.Label(new Rect(px + 8f, py + 50f, pw - 16f, 18f), "Press Enter to confirm");
+            GUI.Label(new Rect(px + 8f, py + 26f, pw - 16f, 22f), new string('*', _passwordInput.Length));
+            GUI.Label(new Rect(px + 8f, py + 50f, pw - 16f, 18f), "Type password + Enter");
             return;
         }
 
