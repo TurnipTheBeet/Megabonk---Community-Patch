@@ -1,8 +1,8 @@
 {
-    "name": "MegaDuel",
-    "version_number": "1.1.0",
-    "website_url": "",
-    "description": "Community kill leaderboard, stat blacklists, item cap removal, and size cap removal.",
+    "name": "Megabonk_Community_Patch",
+    "version_number": "1.3.0",
+    "website_url": "https://github.com/TurnipTheBeet/Megabonk---Community-Patch",
+    "description": "Community patch: leaderboard, Tony passive, Golden Shield fix, item/size cap removal, stat blacklists, fast fall, and more.",
     "dependencies": [
         "BepInEx-BepInExPack_Megabonk-6.0.0"
     ]
