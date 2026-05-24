@@ -913,22 +913,21 @@ static class Patch_CanShowScore
 static class Patch_Leaderboard_Download
 {
     [HarmonyPrefix]
-    static bool Prefix(string lbName)
-    {
-        if (!LeaderboardRelay.Enabled) return true;
-        var lb = FindBoard(lbName);
-        if (lb != null)
-            LeaderboardInjector.ReplaceOrQueue(lb);
-        return false; // always block Steam — never show Steam data
-    }
+    static bool Prefix() => false; // block Steam entirely — we inject from LeaderboardUiNew.Start
+}
 
-    internal static SteamLeaderboardNew FindBoard(string lbName)
+// Hook Start so we have the exact lb the UI is subscribed to — no string matching needed.
+[HarmonyPatch(typeof(LeaderboardUiNew), "Start")]
+static class Patch_LeaderboardUiNew_Start
+{
+    [HarmonyPostfix]
+    static unsafe void Postfix(LeaderboardUiNew __instance)
     {
-        var all    = SteamLeaderboardsManagerNew.leaderboardKillsAllTime;
-        var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
-        if (all    != null && (all.lbName    == lbName || all.lbNameFriends    == lbName)) return all;
-        if (weekly != null && (weekly.lbName == lbName || weekly.lbNameFriends == lbName)) return weekly;
-        return null;
+        if (!LeaderboardRelay.Enabled) return;
+        var lbPtr = *(System.IntPtr*)(__instance.Pointer + 0x48);
+        if (lbPtr == System.IntPtr.Zero) return;
+        var lb = new SteamLeaderboardNew(lbPtr);
+        LeaderboardInjector.ReplaceOrQueue(lb);
     }
 }
 
