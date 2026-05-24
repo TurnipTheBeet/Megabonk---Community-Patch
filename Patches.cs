@@ -69,6 +69,15 @@ static class Patch_RunUnlockables_Init
                 }
             }
         }
+
+        // Force default items into the loot pool
+        var dm = DataManager.Instance;
+        if (dm == null) return;
+        foreach (var eItem in Plugin.ForcedPoolItems)
+        {
+            var data = dm.GetItem(eItem);
+            if (data != null) data.inItemPool = true;
+        }
     }
 
     static void CacheAndApplyStatBlacklist()
@@ -1154,6 +1163,7 @@ static class LeaderboardInjector
     static volatile SteamLeaderboardNew _pending = null;
 
     internal static ServerEntry[] CachedEntries => _cache;
+    internal static bool IsFetching => _fetching;
 
     internal static void BeginFetch(SteamLeaderboardNew lb)
     {
@@ -1499,14 +1509,65 @@ static class Patch_MyTime_Update_ClockTimer
 }
 
 // ─────────────────────────────────────────────────────────────────
-// MAIN MENU — append mod version to game version text
+// LEADERBOARD UI — suppress Steam data while our server fetch is in progress
+// LeaderboardUiNew.OnLeaderboardReady hides the buffering spinner and renders
+// entries. Returning false here keeps the spinner visible until IsFetching=false,
+// at which point our Replace() fires A_LeaderboardReady again and it goes through.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(LeaderboardUiNew), "OnLeaderboardReady")]
+static class Patch_LeaderboardUiNew_OnLeaderboardReady
+{
+    [HarmonyPrefix]
+    static bool Prefix() => !LeaderboardInjector.IsFetching;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MAIN MENU — append mod version to game version text + check for updates
 // ─────────────────────────────────────────────────────────────────
 
 [HarmonyPatch(typeof(MainMenu), "Start")]
 static class Patch_MainMenu_Start_Version
 {
+    static readonly BepInEx.Logging.ManualLogSource Log =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.Version");
+
     [HarmonyPostfix]
-    static void Postfix() => ModGui.MainThread.Enqueue(() => ModGui.NeedVersionPatch = true);
+    static void Postfix()
+    {
+        ModGui.MainThread.Enqueue(() => ModGui.NeedVersionPatch = true);
+        CheckVersionAsync();
+    }
+
+    static void CheckVersionAsync()
+    {
+        System.Threading.Tasks.Task.Run(async () =>
+        {
+            try
+            {
+                using var client = new System.Net.Http.HttpClient { Timeout = System.TimeSpan.FromSeconds(5) };
+                var json = await client.GetStringAsync(Plugin.LeaderboardServer.TrimEnd('/') + "/version");
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("required", out var req))
+                {
+                    string required = req.GetString() ?? "";
+                    if (!string.IsNullOrEmpty(required) && required != Plugin.ModVersion)
+                    {
+                        Log.LogWarning($"Mod outdated: local={Plugin.ModVersion} required={required}");
+                        ModGui.MainThread.Enqueue(() => ModGui.UpdateAvailable = true);
+                    }
+                    else
+                    {
+                        Log.LogInfo($"Mod version OK ({Plugin.ModVersion})");
+                    }
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Log.LogWarning($"Version check failed: {ex.Message}");
+            }
+        });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────

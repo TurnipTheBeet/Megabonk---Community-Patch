@@ -19,6 +19,7 @@ public class ModGui : MonoBehaviour
     // damage chart
     internal static bool ChartDisabled;
     internal static bool NeedVersionPatch;
+    internal static bool UpdateAvailable;
     private GameObject _statsParent;
     private GameObject _damageWindow;
     private GameObject _statsWindowObj;
@@ -204,6 +205,16 @@ public class ModGui : MonoBehaviour
 
     private void OnGUI()
     {
+        if (UpdateAvailable)
+        {
+            float bw = 420f, bh = 36f;
+            float bx = (Screen.width - bw) / 2f;
+            float by = 8f;
+            GUI.Box(new Rect(bx, by, bw, bh), "");
+            GUI.Label(new Rect(bx + 8f, by + 8f, bw - 16f, 20f),
+                "!! MegaBonk Mod is outdated — please update to the latest version !!");
+        }
+
         if (_promptVisible && !_authenticated)
         {
             float pw = 240f, ph = 72f;

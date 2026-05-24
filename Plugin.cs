@@ -8,16 +8,17 @@ using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.4")]
+[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.5")]
 public class Plugin : BasePlugin
 {
     internal const string LeaderboardServer = "http://67.5.111.0:9000";
-    internal const string ModVersion        = "1.3.4";
+    internal const string ModVersion        = "1.3.5";
 
     internal const bool PatchGrandmasTonic = true;
     internal const bool PatchSpicyMeatball = true;
 
     internal static readonly HashSet<EItem> ActiveUncappedItems   = new() { EItem.Anvil, EItem.OverpoweredLamp, EItem.ZaWarudo };
+    internal static readonly HashSet<EItem> ForcedPoolItems       = new() { EItem.Battery, EItem.Skuleg, EItem.OldMask, EItem.BrassKnuckles, EItem.DemonicBlood, EItem.IdleJuice, EItem.SuckyMagnet };
     internal static readonly HashSet<int>   BlacklistedStats       = new() { 0,1,2,3,4,5,10,11,24,29 };
     internal static readonly HashSet<int>   BlacklistedShrineStats = new() { 0,1,2,3,4,5,10,11,24,29 };
     internal static readonly List<int>      FullStatPool           = new();
