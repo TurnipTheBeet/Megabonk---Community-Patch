@@ -2,139 +2,174 @@
 using HarmonyLib;
 using UnityEngine;
 using Assets.Scripts.Managers;
-using Assets.Scripts.Actors.Enemies;
 using Assets.Scripts.Inventory__Items__Pickups.Weapons;
+using System.Collections.Generic;
+using System.Reflection;
 
 namespace MegaBonkMod;
 
-internal static class FreeLaserHelper
+// ── Shared state ──────────────────────────────────────────────────────────────
+static class SpaceNoodleState
 {
-    // Use the same camera + layermask the shotgun/sniper use for their aim raycast
-    internal static Vector3 GetAimPoint(Vector3 fallback)
-    {
-        var cam = PlayerCamera.Instance?.camera;
-        if (cam == null) return fallback;
-
-        var ray  = cam.ScreenPointToRay(Input.mousePosition);
-        int mask = GameManager.Instance?.whatIsProjectileRaycast ?? -1;
-
-        return Physics.Raycast(ray, out RaycastHit hit, 1000f, mask)
-            ? hit.point
-            : fallback;
-    }
-
-    // GetBeamStart() = player world pos. Add chest offset.
-    internal static Vector3 GetMuzzlePos(LaserBeamAttack instance)
-    {
-        var player = GameManager.Instance?.player;
-        var origin = player != null
-            ? player.transform.position
-            : instance.transform.position;
-        return origin + Vector3.up * 1.2f;
-    }
+    // FixedUpdate writes target positions; Update reads them for visuals.
+    internal static readonly Dictionary<System.IntPtr, Vector3[]> ExtraTargetPos = new();
+    internal static readonly Dictionary<System.IntPtr, List<LineRenderer>> ExtraRenderers = new();
+    internal static readonly Collider[] Buf = new Collider[64];
+    internal static MethodInfo HitEnemyMi;
 }
 
-// ── Block auto-targeting ──────────────────────────────────────────────────────
-[HarmonyPatch(typeof(LaserBeamAttack), "FindTarget")]
-static class Patch_FreeLaser_FindTarget
-{
-    static bool Prefix() => false;
-}
-
-// ── Drive beam endpoint to aim point (used by FixedUpdate hit detection) ──────
-[HarmonyPatch(typeof(LaserBeamAttack), "GetBeamEnd")]
-static class Patch_FreeLaser_GetBeamEnd
-{
-    static bool Prefix(LaserBeamAttack __instance, ref Vector3 __result)
-    {
-        __result = FreeLaserHelper.GetAimPoint(
-            FreeLaserHelper.GetMuzzlePos(__instance));
-        return false;
-    }
-}
-
-// ── Replace Update: manage isShooting + render beam toward aim point ──────────
-[HarmonyPatch(typeof(LaserBeamAttack), "Update")]
-static class Patch_FreeLaser_Update
-{
-    static bool Prefix(LaserBeamAttack __instance)
-    {
-        if (__instance.weaponBase == null || !__instance.enabled) return false;
-        if (Time.timeScale == 0f) return false; // paused
-
-        Vector3 startPos = FreeLaserHelper.GetMuzzlePos(__instance);
-        Vector3 aimPoint = FreeLaserHelper.GetAimPoint(startPos);
-        Vector3 dir      = (aimPoint - startPos).normalized;
-
-        unsafe
-        {
-            bool isShooting = *(bool*)(__instance.Pointer + 0x64);
-            if (!isShooting)
-            {
-                *(bool*) (__instance.Pointer + 0x64) = true;
-                *(float*)(__instance.Pointer + 0x58) = Time.time + 999f;
-                *(float*)(__instance.Pointer + 0x5C) = Time.time;
-
-                *(float*)(__instance.Pointer + 0x68) = startPos.x;
-                *(float*)(__instance.Pointer + 0x6C) = startPos.y;
-                *(float*)(__instance.Pointer + 0x70) = startPos.z;
-                *(float*)(__instance.Pointer + 0x74) = aimPoint.x;
-                *(float*)(__instance.Pointer + 0x78) = aimPoint.y;
-                *(float*)(__instance.Pointer + 0x7C) = aimPoint.z;
-
-                if (__instance.linerenderer != null) __instance.linerenderer.enabled = true;
-                if (__instance.laserStart  != null) __instance.laserStart.SetActive(true);
-                if (__instance.laserEnd    != null) __instance.laserEnd.SetActive(true);
-            }
-
-            *(float*)(__instance.Pointer + 0x44) = dir.x;
-            *(float*)(__instance.Pointer + 0x48) = dir.y;
-            *(float*)(__instance.Pointer + 0x4C) = dir.z;
-        }
-
-        if (__instance.laserStart != null)
-            __instance.laserStart.transform.position = startPos;
-        if (__instance.laserEnd != null)
-            __instance.laserEnd.transform.position = aimPoint;
-
-        if (__instance.linerenderer != null)
-        {
-            __instance.linerenderer.useWorldSpace = true;
-            __instance.linerenderer.positionCount = 2;
-            __instance.linerenderer.SetPosition(0, startPos);
-            __instance.linerenderer.SetPosition(1, aimPoint);
-        }
-
-        return false;
-    }
-}
-
-// ── FixedUpdate: keep stopTime ahead + reset prevEnd to muzzle every tick ──────
-// Resetting prevEnd forces the native box cast to sweep the FULL beam (muzzle →
-// aim point) every physics tick, so enemies anywhere along the beam get hit.
+// ── FixedUpdate Postfix: deal damage to extra targets ─────────────────────────
 [HarmonyPatch(typeof(LaserBeamAttack), "FixedUpdate")]
-static class Patch_FreeLaser_FixedUpdate
+static class Patch_SpaceNoodle_ExtraPhysics
 {
-    static void Prefix(LaserBeamAttack __instance)
+    static void Postfix(LaserBeamAttack __instance)
     {
         if (__instance.weaponBase == null) return;
+
+        int extras = WeaponUtility.GetAttackQuantity(__instance.weaponBase) - 1;
+        var ptr     = __instance.Pointer;
+
+        bool  isShooting;
+        nint  mainTarget;
         unsafe
         {
-            if (!*(bool*)(__instance.Pointer + 0x64)) return; // not shooting
+            isShooting = *(bool*)(__instance.Pointer + 0x64);
+            mainTarget = *(nint*)(__instance.Pointer + 0x50);
+        }
 
-            *(float*)(__instance.Pointer + 0x58) = Time.time + 999f; // keep stopTime ahead
+        if (!isShooting || extras <= 0 || mainTarget == 0)
+        {
+            SpaceNoodleState.ExtraTargetPos[ptr] = System.Array.Empty<Vector3>();
+            return;
+        }
 
-            // HitEnemy throws if target==null. Point target at the instance itself so:
-            // - target != 0 (no throw)
-            // - *(target+0x50) = 0 (null rigidbody) → rigidbody check fails → no enemy is skipped
-            if (*(nint*)(__instance.Pointer + 0x50) == 0)
-                *(nint*)(__instance.Pointer + 0x50) = __instance.Pointer;
+        var gm = GameManager.Instance;
+        if (gm?.player == null) return;
 
-            // Reset prevEnd to muzzle so native sweep covers muzzle → aim point
-            Vector3 muzzle = FreeLaserHelper.GetMuzzlePos(__instance);
-            *(float*)(__instance.Pointer + 0x74) = muzzle.x;
-            *(float*)(__instance.Pointer + 0x78) = muzzle.y;
-            *(float*)(__instance.Pointer + 0x7C) = muzzle.z;
+        // Exclude the main target's rigidbody so extra beams go to different enemies.
+        var usedRbs = new HashSet<System.IntPtr>();
+        unsafe
+        {
+            if (mainTarget != __instance.Pointer)   // guard against our own self-ptr trick
+            {
+                nint rb = *(nint*)(mainTarget + 0x50);
+                if (rb != 0) usedRbs.Add((System.IntPtr)rb);
+            }
+        }
+
+        int found = Physics.OverlapSphereNonAlloc(
+            gm.player.transform.position, 30f,
+            SpaceNoodleState.Buf, gm.whatIsEnemy);
+
+        SpaceNoodleState.HitEnemyMi ??=
+            AccessTools.Method(typeof(LaserBeamAttack), "HitEnemy");
+
+        var positions = new List<Vector3>(extras);
+
+        // Temporarily point 'target' at the instance itself.
+        // target+0x50 = 0 (no rigidbody on LaserBeamAttack) so the rigidbody
+        // check inside HitEnemy fails for every collider → all enemies pass through.
+        unsafe { *(nint*)(__instance.Pointer + 0x50) = __instance.Pointer; }
+
+        var args = new object[1];
+        for (int i = 0; i < found && positions.Count < extras; i++)
+        {
+            var col = SpaceNoodleState.Buf[i];
+            if (col == null) continue;
+            var rb = col.attachedRigidbody;
+            if (rb == null) continue;
+            var rbPtr = (System.IntPtr)rb.Pointer;
+            if (!usedRbs.Add(rbPtr)) continue;  // already hitting this enemy
+
+            args[0] = col;
+            SpaceNoodleState.HitEnemyMi.Invoke(__instance, args);
+            positions.Add(col.bounds.center);
+        }
+
+        unsafe { *(nint*)(__instance.Pointer + 0x50) = mainTarget; }
+        SpaceNoodleState.ExtraTargetPos[ptr] = positions.ToArray();
+    }
+}
+
+// ── Update Postfix: draw extra beam visuals ───────────────────────────────────
+[HarmonyPatch(typeof(LaserBeamAttack), "Update")]
+static class Patch_SpaceNoodle_ExtraVisual
+{
+    static void Postfix(LaserBeamAttack __instance)
+    {
+        var ptr = __instance.Pointer;
+
+        SpaceNoodleState.ExtraTargetPos.TryGetValue(ptr, out var targets);
+        int beamCount = targets?.Length ?? 0;
+
+        if (!SpaceNoodleState.ExtraRenderers.TryGetValue(ptr, out var renderers))
+        {
+            renderers = new List<LineRenderer>();
+            SpaceNoodleState.ExtraRenderers[ptr] = renderers;
+        }
+
+        // Lazily create LineRenderers, copying style from the main beam.
+        while (renderers.Count < beamCount)
+        {
+            var go = new GameObject("SpaceNoodleExtraBeam");
+            var lr = go.AddComponent<LineRenderer>();
+            if (__instance.linerenderer != null)
+            {
+                lr.sharedMaterial  = __instance.linerenderer.sharedMaterial;
+                lr.widthMultiplier = __instance.linerenderer.widthMultiplier;
+                lr.startColor      = __instance.linerenderer.startColor;
+                lr.endColor        = __instance.linerenderer.endColor;
+            }
+            lr.positionCount = 2;
+            lr.useWorldSpace = true;
+            renderers.Add(lr);
+        }
+
+        // Muzzle from the main beam's laserStart, else fall back to player pos.
+        Vector3 muzzle;
+        if (__instance.laserStart != null)
+            muzzle = __instance.laserStart.transform.position;
+        else
+        {
+            var player = GameManager.Instance?.player;
+            muzzle = player != null
+                ? player.transform.position + Vector3.up * 1.2f
+                : __instance.transform.position;
+        }
+
+        for (int i = 0; i < renderers.Count; i++)
+        {
+            var lr = renderers[i];
+            if (lr == null) continue;
+            if (i < beamCount)
+            {
+                lr.enabled = true;
+                lr.SetPosition(0, muzzle);
+                lr.SetPosition(1, targets![i]);
+            }
+            else
+            {
+                lr.enabled = false;
+            }
+        }
+    }
+}
+
+// ── OnDestroy Postfix: tear down extra GameObjects ────────────────────────────
+[HarmonyPatch(typeof(LaserBeamAttack), "OnDestroy")]
+static class Patch_SpaceNoodle_Cleanup
+{
+    static void Postfix(LaserBeamAttack __instance)
+    {
+        var ptr = __instance.Pointer;
+        SpaceNoodleState.ExtraTargetPos.Remove(ptr);
+
+        if (SpaceNoodleState.ExtraRenderers.TryGetValue(ptr, out var renderers))
+        {
+            foreach (var lr in renderers)
+                if (lr != null && lr.gameObject != null)
+                    UnityEngine.Object.Destroy(lr.gameObject);
+            SpaceNoodleState.ExtraRenderers.Remove(ptr);
         }
     }
 }

@@ -13,51 +13,31 @@ namespace MegaBonkMod;
 public class Plugin : BasePlugin
 {
     private static ConfigFile _cfg;
-    private static ConfigEntry<bool> _cfgGrandmasTonic;
-    private static ConfigEntry<bool> _cfgSpicyMeatball;
-    private static ConfigEntry<string> _cfgUncappedItems;
     private static ConfigEntry<string> _cfgBlacklistedStats;
     private static ConfigEntry<string> _cfgBlacklistedShrineStats;
     private static ConfigEntry<string> _cfgLeaderboardServer;
 
     internal static string LeaderboardServer => _cfgLeaderboardServer.Value.Trim();
 
-    internal static bool PatchGrandmasTonic
-    {
-        get => _cfgGrandmasTonic.Value;
-        set { _cfgGrandmasTonic.Value = value; SaveConfig(); }
-    }
+    internal const bool PatchGrandmasTonic = true;
+    internal const bool PatchSpicyMeatball = true;
 
-    internal static bool PatchSpicyMeatball
-    {
-        get => _cfgSpicyMeatball.Value;
-        set { _cfgSpicyMeatball.Value = value; SaveConfig(); }
-    }
-
-    internal static readonly HashSet<EItem>   ActiveUncappedItems    = new();
+    internal static readonly HashSet<EItem>   ActiveUncappedItems    = new() { EItem.Anvil, EItem.OverpoweredLamp, EItem.ZaWarudo };
     internal static readonly HashSet<int>     BlacklistedStats        = new();
     internal static readonly HashSet<int>     BlacklistedShrineStats  = new();
     internal static readonly List<int>        FullStatPool            = new();
     internal static readonly List<int>        FullShrineStatPool      = new();
 
+    internal static new BepInEx.Logging.ManualLogSource Log { get; private set; }
+
     public override void Load()
     {
+        Log  = base.Log;
         _cfg = Config;
 
-        string defaultItems = string.Join(",", new[]
-        {
-            (int)EItem.Anvil,
-            (int)EItem.OverpoweredLamp,
-            (int)EItem.ZaWarudo,
-        });
-
-        _cfgGrandmasTonic          = Config.Bind("SizeCaps",       "GrandmasTonic",          true,         "Remove size cap on Grandma's Secret Tonic");
-        _cfgSpicyMeatball          = Config.Bind("SizeCaps",       "SpicyMeatball",          true,         "Remove size cap on Spicy Meatball");
-        _cfgUncappedItems          = Config.Bind("ItemCaps",        "UncappedItems",          defaultItems, "Comma-separated EItem int values with stack caps removed");
-        _cfgBlacklistedStats       = Config.Bind("StatBlacklist",   "BlacklistedStats",       "",           "Stat indices excluded from chaos/gamble tome and Dicehead passive");
-        _cfgBlacklistedShrineStats = Config.Bind("StatBlacklist",   "BlacklistedShrineStats", "",           "Stat indices excluded from charge shrines");
+        _cfgBlacklistedStats       = Config.Bind("StatBlacklist",   "BlacklistedStats",       "0,1,2,4,3,5,10,11,24,29", "Stat indices excluded from chaos/gamble tome and Dicehead passive");
+        _cfgBlacklistedShrineStats = Config.Bind("StatBlacklist",   "BlacklistedShrineStats", "0,1,2,3,4,5,10,11,24,29", "Stat indices excluded from charge shrines");
         _cfgLeaderboardServer      = Config.Bind("Leaderboard",     "ServerEndpoint",         "http://67.5.111.0:9000", "URL of the community leaderboard server (leave blank to disable)");
-        LoadUncappedItems();
         LoadBlacklistedStats();
         LoadBlacklistedShrineStats();
 
@@ -71,18 +51,9 @@ public class Plugin : BasePlugin
 
     internal static void SaveConfig()
     {
-        _cfgUncappedItems.Value          = JoinInts(ActiveUncappedItems,   i => (int)i);
-        _cfgBlacklistedStats.Value       = JoinInts(BlacklistedStats,      i => i);
+        _cfgBlacklistedStats.Value       = JoinInts(BlacklistedStats,       i => i);
         _cfgBlacklistedShrineStats.Value = JoinInts(BlacklistedShrineStats, i => i);
         _cfg.Save();
-    }
-
-    private static void LoadUncappedItems()
-    {
-        ActiveUncappedItems.Clear();
-        foreach (var s in _cfgUncappedItems.Value.Split(','))
-            if (int.TryParse(s.Trim(), out var i))
-                ActiveUncappedItems.Add((EItem)i);
     }
 
     private static void LoadBlacklistedStats()
@@ -110,6 +81,8 @@ public class Plugin : BasePlugin
         EItem.ZaWarudo        => 10,
         _                     => 5,
     };
+
+
 
     private static string JoinInts<T>(IEnumerable<T> source, System.Func<T, int> selector)
     {

@@ -1,6 +1,8 @@
 #nullable disable
 using HarmonyLib;
 using UnityEngine;
+using TMPro;
+using Assets.Scripts.Utility;
 using Il2CppInterop.Runtime;
 
 using Assets.Scripts.Steam;
@@ -27,7 +29,11 @@ using Assets.Scripts.Managers;
 using Assets.Scripts.Inventory.Stats;
 using Assets.Scripts.Actors;
 using Assets.Scripts.Game.Combat;
+using Assets.Scripts.Inventory__Items__Pickups.AbilitiesPassive;
+using Assets.Scripts.Inventory__Items__Pickups.AbilitiesPassive.Implementations;
+using Inventory__Items__Pickups.Xp_and_Levels;
 using Assets.Scripts.Inventory__Items__Pickups.Weapons;
+using Assets.Scripts.Settings___Saves.SaveFiles;
 
 namespace MegaBonkMod;
 
@@ -142,19 +148,16 @@ static class Patch_MicrowaveItemButton_SelectUpgrade
 static class Patch_GrandmasTonic_SizeCap
 {
     const float TargetMax = 16f;
-    static bool _capSet;
 
     [HarmonyPrefix]
     static unsafe void Prefix(ItemGrandmasSecretTonic __instance)
     {
-        if (!Plugin.PatchGrandmasTonic) return;
         *(float*)(__instance.Pointer + 0x3C) = TargetMax;
     }
 
     [HarmonyPostfix]
     static unsafe void Postfix(ItemGrandmasSecretTonic __instance)
     {
-        if (!Plugin.PatchGrandmasTonic || _capSet) return;
         float baseRadius      = *(float*)(__instance.Pointer + 0x34);
         float radiusPerAmount = *(float*)(__instance.Pointer + 0x38);
         if (radiusPerAmount <= 0f) return;
@@ -162,27 +165,23 @@ static class Patch_GrandmasTonic_SizeCap
         var data = DataManager.Instance?.GetItem(EItem.GrandmasSecretTonic);
         if (data == null) return;
         data.maxAmount = data.maxAmountPerRun = maxStacks;
-        _capSet = true;
     }
 }
 
 [HarmonyPatch(typeof(ItemSpicyMeatball), "OnInitOrAmountChanged")]
 static class Patch_SpicyMeatball_SizeCap
 {
-    const float TargetMax = 32f;
-    static bool _capSet;
+    const float TargetMax = 16f;
 
     [HarmonyPrefix]
     static unsafe void Prefix(ItemSpicyMeatball __instance)
     {
-        if (!Plugin.PatchSpicyMeatball) return;
         *(float*)(__instance.Pointer + 0x38) = TargetMax;
     }
 
     [HarmonyPostfix]
     static unsafe void Postfix(ItemSpicyMeatball __instance)
     {
-        if (!Plugin.PatchSpicyMeatball || _capSet) return;
         float baseRadius      = *(float*)(__instance.Pointer + 0x30);
         float radiusPerAmount = *(float*)(__instance.Pointer + 0x34);
         if (radiusPerAmount <= 0f) return;
@@ -190,7 +189,6 @@ static class Patch_SpicyMeatball_SizeCap
         var data = DataManager.Instance?.GetItem(EItem.SpicyMeatball);
         if (data == null) return;
         data.maxAmount = data.maxAmountPerRun = maxStacks;
-        _capSet = true;
     }
 }
 
@@ -256,17 +254,22 @@ static class Patch_ItemData_CompareTo_SuckyMagnet
     static readonly System.Collections.Generic.HashSet<EItem> SortsFirst = new()
     {
         EItem.SuckyMagnet, EItem.Scarf, EItem.EchoShard, EItem.BrassKnuckles,
+        EItem.IdleJuice, EItem.DemonicBlood,
+        EItem.Skuleg, EItem.OldMask, EItem.Battery, EItem.Key,
     };
     // Originally non-toggleable, we made toggleable → sort last
     static readonly System.Collections.Generic.HashSet<EItem> SortsLast = new()
     {
         EItem.Borgar, EItem.Beer, EItem.SpikyShield, EItem.CursedDoll,
+        EItem.GloveLightning, EItem.PhantomShroud,
+        EItem.Medkit, EItem.SlipperyRing, EItem.Oats, EItem.GoldenGlove,
     };
 
     [HarmonyPrefix]
     static bool Prefix(ItemData __instance, UnlockableBase other, ref int __result)
     {
         if (!(other is ItemData od)) return true;
+
         if (__instance.rarity != od.rarity) return true;
         bool thisFirst  = SortsFirst.Contains(__instance.eItem);
         bool otherFirst = SortsFirst.Contains(od.eItem);
@@ -276,6 +279,7 @@ static class Patch_ItemData_CompareTo_SuckyMagnet
         if (otherFirst && !thisFirst) { __result =  1; return false; }
         if (thisLast  && !otherLast)  { __result =  1; return false; }
         if (otherLast && !thisLast)   { __result = -1; return false; }
+        if (thisLast  && otherLast)   { __result =  0; return false; }
         return true;
     }
 }
@@ -297,11 +301,22 @@ static class Patch_CanToggleActivation_NonToggleable
         if (unlockable == dm.GetItem(EItem.Scarf)        ||
             unlockable == dm.GetItem(EItem.SuckyMagnet)  ||
             unlockable == dm.GetItem(EItem.EchoShard)    ||
-            unlockable == dm.GetItem(EItem.BrassKnuckles))
-        {
-            __result = false;
-            return false;
-        }
+            unlockable == dm.GetItem(EItem.BrassKnuckles)||
+            unlockable == dm.GetItem(EItem.IdleJuice)    ||
+            unlockable == dm.GetItem(EItem.DemonicBlood))
+        { __result = false; return false; }
+        if (unlockable == dm.GetItem(EItem.GloveLightning) ||
+            unlockable == dm.GetItem(EItem.PhantomShroud)  ||
+            unlockable == dm.GetItem(EItem.Medkit)         ||
+            unlockable == dm.GetItem(EItem.SlipperyRing)   ||
+            unlockable == dm.GetItem(EItem.Oats)           ||
+            unlockable == dm.GetItem(EItem.GoldenGlove))
+        { __result = true; return false; }
+        if (unlockable == dm.GetItem(EItem.Skuleg)  ||
+            unlockable == dm.GetItem(EItem.OldMask) ||
+            unlockable == dm.GetItem(EItem.Battery) ||
+            unlockable == dm.GetItem(EItem.Key))
+        { __result = false; return false; }
         return true;
     }
 }
@@ -364,11 +379,30 @@ static class Patch_DataManager_Load
         var beer = __instance.GetItem(EItem.Beer);
         if (beer != null) beer.canAlwaysToggle = true;
 
-        // Echo Shard, Brass Knuckles — non-toggleable
-        var echoShard    = __instance.GetItem(EItem.EchoShard);
+        // Echo Shard, Brass Knuckles, Idle Juice, Demonic Blood — non-toggleable
+        var echoShard     = __instance.GetItem(EItem.EchoShard);
         var brassKnuckles = __instance.GetItem(EItem.BrassKnuckles);
-        if (echoShard    != null) echoShard.canAlwaysToggle    = false;
+        var idleJuice     = __instance.GetItem(EItem.IdleJuice);
+        var demonicBlood  = __instance.GetItem(EItem.DemonicBlood);
+        if (echoShard     != null) echoShard.canAlwaysToggle     = false;
         if (brassKnuckles != null) brassKnuckles.canAlwaysToggle = false;
+        if (idleJuice     != null) idleJuice.canAlwaysToggle     = false;
+        if (demonicBlood  != null) demonicBlood.canAlwaysToggle  = false;
+
+        // Thunder Mitts, Phantom Shroud — toggleable
+        var thunderMitts  = __instance.GetItem(EItem.GloveLightning);
+        var phantomShroud = __instance.GetItem(EItem.PhantomShroud);
+        if (thunderMitts  != null) thunderMitts.canAlwaysToggle  = true;
+        if (phantomShroud != null) { phantomShroud.rarity = EItemRarity.Rare; phantomShroud.canAlwaysToggle = true; }
+
+        // Common toggleable
+        foreach (var e in new[] { EItem.Medkit, EItem.SlipperyRing, EItem.Oats, EItem.GoldenGlove })
+        { var it = __instance.GetItem(e); if (it != null) it.canAlwaysToggle = true; }
+
+        // Common non-toggleable
+        foreach (var e in new[] { EItem.Skuleg, EItem.OldMask, EItem.Battery, EItem.Key })
+        { var it = __instance.GetItem(e); if (it != null) it.canAlwaysToggle = false; }
+
 
 
         var chars = __instance.unsortedCharacterData;
@@ -408,6 +442,38 @@ static class Patch_DataManager_Load
                 }
                 if (sumShield < 1f) AppendFlat(cd.statModifiers, (EStat)2, 10f);
             }
+
+        // ── Bow + Revolver — +2 projectiles per level instead of +1 ──
+        foreach (var eWeapon in new[] { EWeapon.Bow, EWeapon.Revolver })
+        {
+            var wd = __instance.GetWeapon(eWeapon);
+            if (wd?.upgradeData?.upgradeModifiers == null) continue;
+            bool found = false;
+            for (int i = 0; i < wd.upgradeData.upgradeModifiers.Count; i++)
+            {
+                var mod = wd.upgradeData.upgradeModifiers[i];
+                if (mod == null) continue;
+                if ((int)mod.stat == 16) // EStat.Projectiles
+                {
+                    mod.modification = 2f;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                AddUpgradeStat(wd.upgradeData.upgradeModifiers, (EStat)16, 2f);
+        }
+
+        // ── Combat scaling ramp ────────────────────────────────────────
+        // hpMultiplicationPerMinute   0.1  → 0.2   (2×)
+        // damageMultiplicationPerMinute 0.028 → 0.056 (2×)
+        // knockbackResistancePerMinute  0.028 → 0.0
+        AccessTools.Field(typeof(CombatScaling), "hpMultiplicationPerMinute")
+                   ?.SetValue(null, 0.2f);
+        AccessTools.Field(typeof(CombatScaling), "damageMultiplicationPerMinute")
+                   ?.SetValue(null, 0.056f);
+        AccessTools.Field(typeof(CombatScaling), "knockbackResistancePerMinute")
+                   ?.SetValue(null, 0.0f);
     }
 
     static unsafe void RemoveStat(Il2CppSystem.Collections.Generic.List<StatModifier> mods, int statInt)
@@ -615,7 +681,7 @@ static class Patch_MicrowaveSpawnCount
 }
 
 // ─────────────────────────────────────────────────────────────────
-// GREED SHRINE — +5% difficulty (native), +10% XP, +10% luck
+// GREED SHRINE — +5% XP, +5% luck (native difficulty unchanged)
 // ─────────────────────────────────────────────────────────────────
 
 [HarmonyPatch(typeof(InteractableShrineGreed), nameof(InteractableShrineGreed.Interact))]
@@ -636,9 +702,8 @@ static class Patch_ShrineGreed_Stats
     static void Postfix(InteractableShrineGreed __instance)
     {
         if (!_wasNotDone || !__instance.done) return;
-        Apply(EStat.Difficulty,           0.20f);
-        Apply(EStat.XpIncreaseMultiplier, 0.45f);
-        Apply(EStat.Luck,                 0.35f);
+        Apply(EStat.XpIncreaseMultiplier, 0.05f);
+        Apply(EStat.Luck,                 0.05f);
     }
 
     static void Apply(EStat stat, float amount)
@@ -788,10 +853,7 @@ static class Patch_Leaderboard_UploadScore_Entry
             if (pm != null)
                 unsafe { character = (int)(*(int*)((System.IntPtr)pm.Pointer + 0x1B8)); }
 
-            int[] details = new int[64];
-            details[1] = character;
-
-            LeaderboardRelay.SendBothBoards(score, details);
+            LeaderboardRelay.SendBothBoards(score, character);
         }
         catch (System.Exception ex)
         {
@@ -912,30 +974,29 @@ static class LeaderboardRelay
     static string Base => Plugin.LeaderboardServer.TrimEnd('/');
     internal static bool Enabled => !string.IsNullOrEmpty(Plugin.LeaderboardServer);
 
-    internal static void SendBothBoards(int score, int[] details)
+    internal static void SendBothBoards(int score, int character)
     {
-        Send("kills", score, details);
+        Send("kills", score, character);
     }
 
-    internal static void Send(string board, int score, int[] details)
+    internal static void Send(string board, int score, int character)
     {
         if (!Enabled) return;
         System.Threading.Tasks.Task.Run(async () =>
         {
             try
             {
-                ulong steamId   = Steamworks.SteamUser.GetSteamID().m_SteamID;
-                string name     = Steamworks.SteamFriends.GetPersonaName();
-                string detailsJson = "[" + string.Join(",", details) + "]";
-                string payload  = $"{{\"board\":\"{board}\",\"score\":{score}," +
-                                  $"\"steamId\":\"{steamId}\",\"name\":{System.Text.Json.JsonSerializer.Serialize(name)}," +
-                                  $"\"details\":{detailsJson}," +
-                                  $"\"timestamp\":{System.DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}";
+                ulong steamId = Steamworks.SteamUser.GetSteamID().m_SteamID;
+                string name   = Steamworks.SteamFriends.GetPersonaName();
+                string payload = $"{{\"board\":\"{board}\",\"score\":{score}," +
+                                 $"\"steamId\":\"{steamId}\",\"name\":{System.Text.Json.JsonSerializer.Serialize(name)}," +
+                                 $"\"characterIndex\":{character}," +
+                                 $"\"timestamp\":{System.DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}";
 
                 using var client = new System.Net.Http.HttpClient { Timeout = System.TimeSpan.FromSeconds(5) };
                 var content = new System.Net.Http.StringContent(payload, System.Text.Encoding.UTF8, "application/json");
                 await client.PostAsync(Base + "/submit", content);
-                Log.LogInfo($"Submitted score {score} on '{board}' as {name}.");
+                Log.LogInfo($"Submitted score {score} char={character} on '{board}' as {name}.");
             }
             catch (System.Exception ex)
             {
@@ -1127,11 +1188,10 @@ static class LeaderboardInjector
         var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
         if (lb != all && lb != weekly) return;
 
-        if (_cache != null && _cache.Length > 0)
-            Replace(lb, _cache);
-        else if (_cache == null)
-            _pending = lb;
-        // _cache.Length == 0: no entries yet, leave Steam data alone
+        if (_cache != null)
+            Replace(lb, _cache);   // empty array → replaces with empty list
+        else
+            _pending = lb;         // fetch in progress, replace when ready
     }
 
     private static void Replace(SteamLeaderboardNew lb, ServerEntry[] entries)
@@ -1167,11 +1227,10 @@ static class LeaderboardInjector
         {
             var se = entries[i];
             ulong sid = ulong.TryParse(se.SteamId, out var s) ? s : 0ul;
-            // Pad to 64 elements — IsLegitCharacter/CanShowScore access arbitrary indices.
-            // Real runs will have full details captured via QueueLeaderboardUpload.
-            var src = (se.Details != null && se.Details.Length > 0) ? se.Details : new int[] { se.Score };
-            int[] details = new int[System.Math.Max(64, src.Length)];
-            System.Array.Copy(src, details, src.Length);
+            // Rebuild a minimal details array the game expects:
+            // details[1] = character (used by Leaderboards.GetCharacter).
+            int[] details = new int[64];
+            details[1] = se.CharacterIndex;
             var t = new LeaderboardEntry_t
             {
                 m_steamIDUser = new CSteamID(sid),
@@ -1218,11 +1277,282 @@ static class LeaderboardInjector
 
     internal class ServerEntry
     {
-        [System.Text.Json.Serialization.JsonPropertyName("score")]   public int    Score   { get; set; }
-        [System.Text.Json.Serialization.JsonPropertyName("steamId")] public string SteamId { get; set; } = "";
-        [System.Text.Json.Serialization.JsonPropertyName("name")]    public string Name    { get; set; } = "";
-        [System.Text.Json.Serialization.JsonPropertyName("details")] public int[]  Details { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("score")]          public int    Score          { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("steamId")]        public string SteamId        { get; set; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("name")]           public string Name           { get; set; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("characterIndex")] public int    CharacterIndex { get; set; }
     }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// GREEN CREDIT CARD — chest price increase per card: 10% → 2%
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(ItemCreditCardGreen), "OnInitOrAmountChanged")]
+static class Patch_CreditCardGreen_ChestCost
+{
+    [HarmonyPostfix]
+    static void Postfix(ItemCreditCardGreen __instance)
+    {
+        __instance.chestPriceIncreasePerAmount = 0.02f;
+    }
+}
+
+[HarmonyPatch(typeof(ItemCreditCardGreen), "GetDescription")]
+static class Patch_CreditCardGreen_Desc
+{
+    [HarmonyPostfix]
+    static void Postfix(ref string __result)
+    {
+        if (__result != null)
+            __result = __result.Replace("10%", "2%").Replace("10 %", "2%");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// BACKPACK — description: +1 projectile → +2 projectiles
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(ItemBase), "GetDescription")]
+static class Patch_Backpack_Desc
+{
+    static readonly BepInEx.Logging.ManualLogSource Log =
+        BepInEx.Logging.Logger.CreateLogSource("MBM.BackpackDesc");
+
+    [HarmonyPostfix]
+    static void Postfix(ItemBase __instance, ref string __result)
+    {
+        Log.LogInfo($"[GetDesc] type={__instance?.GetType().Name ?? "null"} result='{__result ?? "<null>"}'");
+        if (__result == null) return;
+        __result = __result
+            .Replace("+1 Projectile Count", "+2 Projectile Count")
+            .Replace("+1 projectile count", "+2 projectile count");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CURSED DOLL — 50% max HP damage, 7 cursed enemies per doll
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(ItemCursedDoll), "OnInitOrAmountChanged")]
+static class Patch_CursedDoll_Buff
+{
+    [HarmonyPostfix]
+    static unsafe void Postfix(ItemCursedDoll __instance)
+    {
+        var p = __instance.Pointer;
+        int amount = *(int*)(p + 0x18);          // ItemBase.amount
+        *(float*)(p + 0x34) = 0.5f;              // damageMaxHpPercentage  0.3 → 0.5
+        *(int*)(p + 0x38)   = 7;                 // enemiesCursedPerDoll   2   → 7
+        *(int*)(p + 0x30)   = 7 * amount;        // maxNumCursedEnemies    recalc
+    }
+}
+
+[HarmonyPatch(typeof(ItemCursedDoll), "GetDescription")]
+static class Patch_CursedDoll_Desc
+{
+    [HarmonyPostfix]
+    static void Postfix(ref string __result)
+    {
+        if (__result == null) return;
+        __result = __result.Replace("30%", "50%").Replace("30 %", "50%");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// STEAM UPLOAD BLOCK — lock upload_score_to_leaderboard = 0
+// Forces the game's own setting to off so it never tries to submit
+// to Steam. Our LeaderboardRelay prefix intercepts Leaderboards.UploadScore
+// BEFORE this check runs, uploads to our server, and returns false —
+// so it is completely independent of this setting.
+//
+// Pointer chain (all instance offsets from IL2CPP dump):
+//   SaveManager instance
+//     + 0x20 → ConfigSaveFile* config
+//       + 0x18 → CFGameSettings* cfGameSettings
+//         + 0x44 → int upload_score_to_leaderboard  (0 = off)
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(SaveManager), "Init")]
+static class Patch_SaveManager_Init_LockUploadOff
+{
+    [HarmonyPostfix]
+    static void Postfix(SaveManager __instance) => SteamUploadLocker.ForceOff(__instance);
+}
+
+[HarmonyPatch(typeof(SaveManager), "SaveConfig")]
+static class Patch_SaveManager_SaveConfig_LockUploadOff
+{
+    // Zero the field BEFORE the save writes to disk so it persists as 0.
+    [HarmonyPrefix]
+    static void Prefix(SaveManager __instance) => SteamUploadLocker.ForceOff(__instance);
+}
+
+static class SteamUploadLocker
+{
+    internal const string FieldName = "upload_score_to_leaderboard";
+
+    internal static unsafe void ForceOff(SaveManager sm)
+    {
+        if (sm == null) return;
+        var smPtr = sm.Pointer;
+        if (smPtr == System.IntPtr.Zero) return;
+        var configPtr = *(System.IntPtr*)(smPtr + 0x20);    // SaveManager.config
+        if (configPtr == System.IntPtr.Zero) return;
+        var cfgPtr    = *(System.IntPtr*)(configPtr + 0x18); // ConfigSaveFile.cfGameSettings
+        if (cfgPtr == System.IntPtr.Zero) return;
+        *(int*)(cfgPtr + 0x44) = 0;                          // upload_score_to_leaderboard = 0
+    }
+}
+
+// Disable the toggle in the settings UI — visible but not interactable.
+// BetterSetting.disabledOverlay is a built-in overlay the game uses for locked settings.
+// EnumSetting (which renders int settings like this one) does not override SetSetting,
+// so patching the base class covers it.
+[HarmonyPatch(typeof(BetterSetting), "SetSetting")]
+static class Patch_BetterSetting_SetSetting_DisableUpload
+{
+    [HarmonyPostfix]
+    static void Postfix(BetterSetting __instance, string settingName)
+    {
+        if (settingName != SteamUploadLocker.FieldName) return;
+        var label = __instance.t_disabledText;
+        if (label != null) label.text = "Disabled";
+        var overlay = __instance.disabledOverlay;
+        if (overlay != null) overlay.SetActive(true);
+    }
+}
+
+// Belt-and-suspenders: block any write through the UI save path too.
+[HarmonyPatch(typeof(CurrentSettings), "BetterUpdateCfSettings")]
+static class Patch_CurrentSettings_BetterUpdateCfSettings_BlockUpload
+{
+    [HarmonyPrefix]
+    static bool Prefix(string settingName) =>
+        settingName != SteamUploadLocker.FieldName;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// TONY MCZOOM (Zooma passive) — +0.5 projectiles per level
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(PassiveAbilityZooma), "Init")]
+static class Patch_Zooma_Init_Projectiles
+{
+    static readonly System.Reflection.MethodInfo _setStat =
+        HarmonyLib.AccessTools.Method(typeof(PassiveAbility), "SetStat");
+
+    [HarmonyPostfix]
+    static void Postfix(PassiveAbilityZooma __instance)
+    {
+        PlayerXp.A_LevelUp += new System.Action<int>(level =>
+        {
+            try
+            {
+                var mod = new StatModifier();
+                mod.stat         = (EStat)16;
+                mod.modifyType   = EStatModifyType.Flat;
+                mod.modification = 0.25f * level;
+                _setStat.Invoke(__instance, new object[] { mod });
+            }
+            catch { }
+        });
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GOLDEN SHIELD — remove reduced gold from Kevin self-damage
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ItemGoldenShield), "OnPlayerTakeDamage")]
+static class Patch_GoldenShield_NoKevinReduction
+{
+    [HarmonyPrefix]
+    static void Prefix(DamageContainer dc)
+    {
+        if (dc != null && dc.damageSource == ItemKevin.damageSource)
+            dc.damageSource = "";
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CLOCK POWERUP — freeze run timer while TimeFreeze is active
+// Only runTimer is frozen; stageTimer/difficultyTimer/etc. keep ticking
+// so mob spawning and difficulty scaling are unaffected.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(MyTime), "Update")]
+static class Patch_MyTime_Update_ClockTimer
+{
+    static float _savedStageTimer;
+
+    [HarmonyPrefix]
+    static void Prefix()
+    {
+        _savedStageTimer = MyTime.stageTimer;
+    }
+
+    [HarmonyPostfix]
+    static void Postfix()
+    {
+        var inv = GameManager.Instance?.GetPlayerInventory();
+        if (inv?.statusEffects?.HasStatusEffect(EStatusEffect.TimeFreeze) ?? false)
+            MyTime.stageTimer = _savedStageTimer;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MAIN MENU — append mod version to game version text
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(MainMenu), "Start")]
+static class Patch_MainMenu_Start_Version
+{
+    [HarmonyPostfix]
+    static void Postfix() => ModGui.MainThread.Enqueue(() => ModGui.NeedVersionPatch = true);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// DAMAGE CHART — F2 toggle: clear stale rows before Start() rebuilds them
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(GameOverDamageSourcesUi), "Start")]
+static class Patch_GameOverDamageSourcesUi_Start
+{
+    [HarmonyPrefix]
+    static void Prefix()
+    {
+        var entries = GameObject.Find(
+            "GameUI/GameUI/DeathScreen/StatsWindows/W_Damage/WindowLayers/Content/ScrollRect/ContentEntries");
+        if (entries == null) return;
+        var t = entries.transform;
+        for (int i = t.childCount - 1; i >= 3; i--)
+            UnityEngine.Object.Destroy(t.GetChild(i).gameObject);
+    }
+}
+
+[HarmonyPatch(typeof(GameManager), "StartPlaying")]
+static class Patch_GameManager_StartPlaying_Chart
+{
+    [HarmonyPostfix]
+    static void Postfix()
+    {
+        ModGui.ChartDisabled = false;
+        // scene reloaded — force re-find of StatsWindows next F2 press
+        var gui = UnityEngine.Object.FindObjectOfType<ModGui>();
+        gui?.ResetChartCache();
+    }
+}
+
+[HarmonyPatch(typeof(GameManager), "OnDied")]
+static class Patch_GameManager_OnDied_Chart
+{
+    [HarmonyPostfix]
+    static void Postfix() => ModGui.ChartDisabled = true;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// COMBAT SCALING — 2× HP/damage ramp, knockback resistance → 0
+// Static field layout (from cctor):
+//   +0x0  speedMultiplicationPerMinute    0.025  (unchanged)
+//   +0x4  hpMultiplicationPerMinute       0.1  → 0.2
+//   +0x8  damageMultiplicationPerMinute   0.028 → 0.056
+//   +0xC  knockbackResistancePerMinute    0.028 → 0.0
+// ─────────────────────────────────────────────────────────────────
 

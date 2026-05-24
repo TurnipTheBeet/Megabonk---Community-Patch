@@ -39,8 +39,20 @@
       <HintPath>$(InteropDir)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(InteropDir)\UnityEngine.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(InteropDir)\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>$(InteropDir)\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(InteropDir)\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="com.rlabrecque.steamworks.net">
@@ -48,5 +60,14 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
+
+
+  <!-- Auto-deploy to r2modman Default profile on every build -->
+  <PropertyGroup>
+    <PluginDir>C:\Users\kenne\AppData\Roaming\r2modmanPlus-local\Megabonk\profiles\Default\BepInEx\plugins</PluginDir>
+  </PropertyGroup>
+  <Target Name="DeployPlugin" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll" DestinationFolder="$(PluginDir)" />
+  </Target>
 
 </Project>
