@@ -9,7 +9,7 @@ using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.0")]
+[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.1")]
 public class Plugin : BasePlugin
 {
     private static ConfigFile _cfg;
