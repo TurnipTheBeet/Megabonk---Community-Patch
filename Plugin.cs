@@ -8,7 +8,7 @@ using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.2")]
+[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.3")]
 public class Plugin : BasePlugin
 {
     internal const string LeaderboardServer = "http://67.5.111.0:9000";

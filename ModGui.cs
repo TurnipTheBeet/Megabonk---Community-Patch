@@ -11,6 +11,10 @@ public class ModGui : MonoBehaviour
     internal static readonly System.Collections.Concurrent.ConcurrentQueue<System.Action> MainThread = new();
 
     private bool _visible;
+    private bool _authenticated;
+    private bool _promptVisible;
+    private string _passwordInput = "";
+    private const string Password = "kittens";
 
     // damage chart
     internal static bool ChartDisabled;
@@ -57,7 +61,17 @@ public class ModGui : MonoBehaviour
         }
 
         if (Input.GetKeyDown(KeyCode.F1))
-            _visible = !_visible;
+        {
+            if (_authenticated)
+            {
+                _visible = !_visible;
+            }
+            else
+            {
+                _promptVisible = !_promptVisible;
+                _passwordInput = "";
+            }
+        }
 
         if (Input.GetKeyDown(KeyCode.F2) && !ChartDisabled)
             ToggleDamageChart();
@@ -161,6 +175,32 @@ public class ModGui : MonoBehaviour
 
     private void OnGUI()
     {
+        if (_promptVisible && !_authenticated)
+        {
+            float pw = 240f, ph = 72f;
+            float px = (Screen.width  - pw) / 2f;
+            float py = (Screen.height - ph) / 2f;
+            GUI.Box(new Rect(px, py, pw, ph), "Mod Menu Password");
+            GUI.SetNextControlName("pwField");
+            _passwordInput = GUI.PasswordField(new Rect(px + 8f, py + 26f, pw - 16f, 22f), _passwordInput, '*', 32);
+            GUI.FocusControl("pwField");
+            if (Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return)
+            {
+                if (_passwordInput == Password)
+                {
+                    _authenticated  = true;
+                    _promptVisible  = false;
+                    _visible        = true;
+                }
+                else
+                {
+                    _passwordInput = "";
+                }
+            }
+            GUI.Label(new Rect(px + 8f, py + 50f, pw - 16f, 18f), "Press Enter to confirm");
+            return;
+        }
+
         if (!_visible) return;
 
         float wx = _winPos.x;

@@ -1,5 +1,7 @@
 # Megabonk Community Patch
 
+> **⚠ Work in Progress** — This mod is actively being developed. Expect bugs and frequent updates.
+
 A community-driven quality-of-life mod for Megabonk.
 
 ## Features

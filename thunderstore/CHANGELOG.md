@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.3
+- Password protect F1 debug menu
+- Mark mod as WIP in README
+
 ## 1.3.2
 - Hardcode stat blacklists and leaderboard server — no longer user-configurable
 
