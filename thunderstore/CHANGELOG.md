@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.4
+- Leaderboard now requires current mod version — outdated clients rejected
+
 ## 1.3.3
 - Password protect F1 debug menu
 - Mark mod as WIP in README

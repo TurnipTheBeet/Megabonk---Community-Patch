@@ -991,6 +991,7 @@ static class LeaderboardRelay
                 string payload = $"{{\"board\":\"{board}\",\"score\":{score}," +
                                  $"\"steamId\":\"{steamId}\",\"name\":{System.Text.Json.JsonSerializer.Serialize(name)}," +
                                  $"\"characterIndex\":{character}," +
+                                 $"\"modVersion\":\"{Plugin.ModVersion}\"," +
                                  $"\"timestamp\":{System.DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}";
 
                 using var client = new System.Net.Http.HttpClient { Timeout = System.TimeSpan.FromSeconds(5) };
