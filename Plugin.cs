@@ -8,11 +8,11 @@ using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.5")]
+[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.6")]
 public class Plugin : BasePlugin
 {
     internal static string LeaderboardServer = "http://67.5.111.0:9000";
-    internal const  string ModVersion        = "1.3.5";
+    internal const  string ModVersion        = "1.3.6";
 
     internal const bool PatchGrandmasTonic = true;
     internal const bool PatchSpicyMeatball = true;

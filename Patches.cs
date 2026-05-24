@@ -323,6 +323,34 @@ static class Patch_CanToggleActivation_NonToggleable
 }
 
 // ─────────────────────────────────────────────────────────────────
+// FORCE POOL AVAILABILITY — IsAvailable is the actual gate that
+// RunUnlockables uses to build the item pool. Items deactivated in
+// save (e.g. Sucky Magnet toggled off before we made it non-toggleable)
+// return false from IsAvailable via the deactivated-set check.
+// Prefix to force true for all ForcedPoolItems.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(MyAchievements), "IsAvailable")]
+static class Patch_IsAvailable_ForcedItems
+{
+    [HarmonyPrefix]
+    static bool Prefix(UnlockableBase unlockable, ref bool __result)
+    {
+        var dm = DataManager.Instance;
+        if (dm == null) return true;
+        foreach (var eItem in Plugin.ForcedPoolItems)
+        {
+            if (unlockable == dm.GetItem(eItem))
+            {
+                __result = true;
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // WEAPON + TOME TOGGLES — expose canAlwaysToggle on all entries
 // ─────────────────────────────────────────────────────────────────
 
@@ -477,12 +505,12 @@ static class Patch_DataManager_Load
                    ?.SetValue(null, 0.0f);
 
         // Force non-toggleable items into the loot pool permanently.
-        // Must be done here (DataManager.Load) not in RunUnlockables.Init postfix,
-        // because availableItems is already built by the time Init postfix fires.
+        // isEnabled must be true — FUN_180405d10 checks it before inItemPool.
+        // Some items (e.g. SuckyMagnet) ship with isEnabled=false in asset data.
         foreach (var eItem in Plugin.ForcedPoolItems)
         {
             var data = __instance.GetItem(eItem);
-            if (data != null) data.inItemPool = true;
+            if (data != null) { data.inItemPool = true; data.isEnabled = true; }
         }
     }
 

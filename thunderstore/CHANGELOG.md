@@ -1,7 +1,10 @@
 # Changelog
 
+## 1.3.6
+- Fix forced pool items (Sucky Magnet etc.) not appearing in runs due to save deactivation state
+
 ## 1.3.5
-- Force Battery, Skuleg, OldMask, BrassKnuckles, DemonicBlood, IdleJuice, SuckyMagnet into loot pool
+- Force Battery, Skuleg, OldMask, BrassKnuckles, DemonicBlood, IdleJuice, SuckyMagnet into loot pool; toggle hidden (always active)
 - Show in-game warning banner if mod is outdated (server-driven version check on main menu load)
 - ServerUrl added to config (hosts only — do not change)
 - Leaderboard fixes and stability improvements
