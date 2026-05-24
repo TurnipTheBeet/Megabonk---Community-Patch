@@ -11,8 +11,8 @@ namespace MegaBonkMod;
 [BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.5")]
 public class Plugin : BasePlugin
 {
-    internal const string LeaderboardServer = "http://67.5.111.0:9000";
-    internal const string ModVersion        = "1.3.5";
+    internal static string LeaderboardServer = "http://67.5.111.0:9000";
+    internal const  string ModVersion        = "1.3.5";
 
     internal const bool PatchGrandmasTonic = true;
     internal const bool PatchSpicyMeatball = true;
@@ -30,12 +30,16 @@ public class Plugin : BasePlugin
     {
         Log = base.Log;
 
+        var cfgServer = Config.Bind("Leaderboard", "ServerUrl", "http://67.5.111.0:9000",
+            "URL of the leaderboard server. Change to http://localhost:9000 if running the server locally.");
+        LeaderboardServer = cfgServer.Value;
+
         ClassInjector.RegisterTypeInIl2Cpp<ModGui>();
         var harmony = new Harmony("com.megabonk.mod");
         harmony.PatchAll(typeof(Plugin).Assembly);
         AddComponent<ModGui>();
 
-        Log.LogInfo("[MegaBonkMod] Loaded.");
+        Log.LogInfo($"[MegaBonkMod] Loaded. Server={LeaderboardServer}");
     }
 
     internal static int GetItemCap(EItem item) => item switch
