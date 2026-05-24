@@ -912,26 +912,56 @@ static class Patch_CanShowScore
 [HarmonyPatch(typeof(SteamLeaderboardsManagerNew), "DownloadLeaderboardEntries")]
 static class Patch_Leaderboard_Download
 {
+    static readonly BepInEx.Logging.ManualLogSource Log =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.LbDownload");
+
     [HarmonyPrefix]
-    static bool Prefix() => false; // block Steam entirely — we inject from LeaderboardUiNew.Start
+    static bool Prefix(string lbName)
+    {
+        if (!LeaderboardRelay.Enabled) return true;
+        var lb = FindBoard(lbName);
+        if (lb != null)
+        {
+            Log.LogInfo($"Starting fetch for board '{lb.lbName}' (requested '{lbName}')");
+            LeaderboardInjector.BeginFetch(lb);
+        }
+        return true; // let Steam download proceed so its callback fires A_LeaderboardReady
+    }
+
+    internal static SteamLeaderboardNew FindBoard(string lbName)
+    {
+        var all    = SteamLeaderboardsManagerNew.leaderboardKillsAllTime;
+        var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
+        if (all    != null && (all.lbName    == lbName || all.lbNameFriends    == lbName)) return all;
+        if (weekly != null && (weekly.lbName == lbName || weekly.lbNameFriends == lbName)) return weekly;
+        return null;
+    }
 }
 
-// Hook Start so we have the exact lb the UI is subscribed to — no string matching needed.
-[HarmonyPatch(typeof(LeaderboardUiNew), "Start")]
-static class Patch_LeaderboardUiNew_Start
+[HarmonyPatch(typeof(SteamLeaderboardNew), "OnDownloadResultsGlobal")]
+static class Patch_OnDownloadResultsGlobal
 {
     [HarmonyPostfix]
-    static unsafe void Postfix(LeaderboardUiNew __instance)
+    static void Postfix(SteamLeaderboardNew __instance)
     {
-        // Always hide the buffering spinner — we control when data shows
-        var bufPtr = *(System.IntPtr*)(__instance.Pointer + 0x30);
-        if (bufPtr != System.IntPtr.Zero) new GameObject(bufPtr).SetActive(false);
-
         if (!LeaderboardRelay.Enabled) return;
-        var lbPtr = *(System.IntPtr*)(__instance.Pointer + 0x48);
-        if (lbPtr == System.IntPtr.Zero) return;
-        var lb = new SteamLeaderboardNew(lbPtr);
-        LeaderboardInjector.ReplaceOrQueue(lb);
+        LeaderboardInjector.ReplaceEntriesIfReady(__instance);
+    }
+}
+
+[HarmonyPatch(typeof(SteamLeaderboardNew), "OnDownloadResultsFriends")]
+static class Patch_OnDownloadResultsFriends
+{
+    [HarmonyPostfix]
+    static void Postfix(SteamLeaderboardNew __instance)
+    {
+        if (!LeaderboardRelay.Enabled) return;
+        var all    = SteamLeaderboardsManagerNew.leaderboardKillsAllTime;
+        var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
+        if (__instance != all && __instance != weekly) return;
+        var cache = LeaderboardInjector.CachedEntries;
+        if (cache == null || cache.Length == 0) return;
+        __instance.friendsEntries = LeaderboardInjector.BuildFriendsList(cache);
     }
 }
 
@@ -1122,14 +1152,13 @@ static class LeaderboardInjector
     static volatile bool                _fetching = false;
     static volatile SteamLeaderboardNew _pending  = null;
 
+    internal static ServerEntry[] CachedEntries => _cache;
     internal static bool IsFetching => _fetching;
 
-    // Start (or restart) a fetch. Clears cache so stale data is never shown.
-    internal static void BeginFetch()
+    internal static void BeginFetch(SteamLeaderboardNew lb)
     {
         if (_fetching) return;
         _fetching = true;
-        _cache    = null;
         System.Threading.Tasks.Task.Run(async () =>
         {
             try
@@ -1140,35 +1169,30 @@ static class LeaderboardInjector
                 {
                     _cache    = entries;
                     _fetching = false;
-                    Log.LogInfo($"Fetch complete: {entries.Length} entries");
+                    Log.LogInfo($"Fetch 'kills' complete: {entries.Length} entries");
                     var p = _pending;
                     _pending = null;
-                    if (p != null) Replace(p, entries);
+                    if (p != null && entries.Length > 0) Replace(p, entries);
                 });
             }
             catch (System.Exception ex)
             {
                 _fetching = false;
-                Log.LogError($"Fetch error: {ex.Message}");
+                Log.LogError($"Fetch 'kills' error: {ex.Message}");
             }
         });
     }
 
-    // Called when the leaderboard UI requests data.
-    // If already cached: delay one frame so LeaderboardUiNew.Start can subscribe to A_LeaderboardReady first.
-    // If still fetching: queue the board; fetch completion fires Replace via MainThread already.
-    internal static void ReplaceOrQueue(SteamLeaderboardNew lb)
+    internal static void ReplaceEntriesIfReady(SteamLeaderboardNew lb)
     {
+        var all    = SteamLeaderboardsManagerNew.leaderboardKillsAllTime;
+        var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
+        if (lb != all && lb != weekly) return;
+
         if (_cache != null)
-        {
-            var captured = _cache;
-            ModGui.MainThread.Enqueue(() => Replace(lb, captured));
-        }
+            Replace(lb, _cache);
         else
-        {
             _pending = lb;
-            BeginFetch(); // no-op if already in progress
-        }
     }
 
     private static void Replace(SteamLeaderboardNew lb, ServerEntry[] entries)
@@ -1488,7 +1512,6 @@ static class Patch_MainMenu_Start_Version
     static void Postfix()
     {
         ModGui.MainThread.Enqueue(() => ModGui.NeedVersionPatch = true);
-        LeaderboardInjector.BeginFetch(); // pre-cache so leaderboard is instant when opened
         CheckVersionAsync();
     }
 
@@ -1559,11 +1582,7 @@ static class Patch_GameManager_StartPlaying_Chart
 static class Patch_GameManager_OnDied_Chart
 {
     [HarmonyPostfix]
-    static void Postfix()
-    {
-        ModGui.ChartDisabled = true;
-        LeaderboardInjector.BeginFetch(); // refresh server data after each run
-    }
+    static void Postfix() => ModGui.ChartDisabled = true;
 }
 
 // ─────────────────────────────────────────────────────────────────
