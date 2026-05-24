@@ -31,7 +31,7 @@ public class Plugin : BasePlugin
         Log = base.Log;
 
         var cfgServer = Config.Bind("Leaderboard", "ServerUrl", "http://67.5.111.0:9000",
-            "URL of the leaderboard server. Change to http://localhost:9000 if running the server locally.");
+            "DO NOT CHANGE THIS. Only modify if you are the server host running locally (use http://localhost:9000).");
         LeaderboardServer = cfgServer.Value;
 
         ClassInjector.RegisterTypeInIl2Cpp<ModGui>();
