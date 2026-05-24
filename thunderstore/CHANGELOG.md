@@ -1,9 +1,10 @@
 # Changelog
 
 ## 1.3.5
-- Leaderboard: suppress Steam data while server fetch is in progress (keep loading spinner visible)
 - Force Battery, Skuleg, OldMask, BrassKnuckles, DemonicBlood, IdleJuice, SuckyMagnet into loot pool
-- Show in-game warning banner if mod is outdated (server-driven version check)
+- Show in-game warning banner if mod is outdated (server-driven version check on main menu load)
+- ServerUrl added to config (hosts only — do not change)
+- Leaderboard fixes and stability improvements
 
 ## 1.3.4
 - Leaderboard now requires current mod version — outdated clients rejected
