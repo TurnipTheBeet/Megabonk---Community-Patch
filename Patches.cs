@@ -70,14 +70,6 @@ static class Patch_RunUnlockables_Init
             }
         }
 
-        // Force default items into the loot pool
-        var dm = DataManager.Instance;
-        if (dm == null) return;
-        foreach (var eItem in Plugin.ForcedPoolItems)
-        {
-            var data = dm.GetItem(eItem);
-            if (data != null) data.inItemPool = true;
-        }
     }
 
     static void CacheAndApplyStatBlacklist()
@@ -483,6 +475,15 @@ static class Patch_DataManager_Load
                    ?.SetValue(null, 0.056f);
         AccessTools.Field(typeof(CombatScaling), "knockbackResistancePerMinute")
                    ?.SetValue(null, 0.0f);
+
+        // Force non-toggleable items into the loot pool permanently.
+        // Must be done here (DataManager.Load) not in RunUnlockables.Init postfix,
+        // because availableItems is already built by the time Init postfix fires.
+        foreach (var eItem in Plugin.ForcedPoolItems)
+        {
+            var data = __instance.GetItem(eItem);
+            if (data != null) data.inItemPool = true;
+        }
     }
 
     static unsafe void RemoveStat(Il2CppSystem.Collections.Generic.List<StatModifier> mods, int statInt)
