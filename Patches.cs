@@ -1152,13 +1152,14 @@ static class LeaderboardInjector
     }
 
     // Called when the leaderboard UI requests data.
-    // If already cached: inject immediately.
-    // If still fetching: queue the board, inject when fetch completes.
+    // If already cached: delay one frame so LeaderboardUiNew.Start can subscribe to A_LeaderboardReady first.
+    // If still fetching: queue the board; fetch completion fires Replace via MainThread already.
     internal static void ReplaceOrQueue(SteamLeaderboardNew lb)
     {
         if (_cache != null)
         {
-            Replace(lb, _cache);
+            var captured = _cache;
+            ModGui.MainThread.Enqueue(() => Replace(lb, captured));
         }
         else
         {
