@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.8
+- Fix combat scaling (2× HP/damage ramp, knockback resistance removal) — was silently broken due to IL2CPP static field access bug
+- Remove leftover debug logging patches (Lightning Orb, Bluetooth Dagger, Backpack) that were causing significant per-frame log spam and GC pressure
+- Fix Tony McZooms passive stacking duplicate handlers across runs
+
 ## 1.3.7
 - Remove Spicy Meatball patch (was doubling max size from 8m to 16m, causing severe lag)
 

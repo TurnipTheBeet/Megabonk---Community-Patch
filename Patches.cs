@@ -469,16 +469,6 @@ static class Patch_DataManager_Load
                 AddUpgradeStat(wd.upgradeData.upgradeModifiers, (EStat)16, 2f);
         }
 
-        // ── Combat scaling ramp ────────────────────────────────────────
-        // hpMultiplicationPerMinute   0.1  → 0.2   (2×)
-        // damageMultiplicationPerMinute 0.028 → 0.056 (2×)
-        // knockbackResistancePerMinute  0.028 → 0.0
-        AccessTools.Field(typeof(CombatScaling), "hpMultiplicationPerMinute")
-                   ?.SetValue(null, 0.2f);
-        AccessTools.Field(typeof(CombatScaling), "damageMultiplicationPerMinute")
-                   ?.SetValue(null, 0.056f);
-        AccessTools.Field(typeof(CombatScaling), "knockbackResistancePerMinute")
-                   ?.SetValue(null, 0.0f);
 
         // Force non-toggleable items into the loot pool permanently.
         // isEnabled must be true — FUN_180405d10 checks it before inItemPool.
@@ -1026,64 +1016,6 @@ static class LeaderboardRelay
 // LEADERBOARD INJECTOR — replace Steam entries with server data
 // ─────────────────────────────────────────────────────────────────
 
-// ─────────────────────────────────────────────────────────────────
-// DEBUG — LightningOrb × BluetoothDagger / LightningStaff stun bug
-//
-// Theory A: ProjectileBluetooth.HitTarget never sets dc.element = Lightning.
-//   LOrb.ProcOnHitEffects gates the stun path on (dc.element == Lightning),
-//   so BT-Dagger hits always fail the check and never stun.
-//   LightningBolt.TryInit explicitly writes *(dc+0x34) = 1, so Staff hits pass.
-//
-// Theory B: Both stun callsites in ProcOnHitEffects pass a hardcoded global
-//   float as duration with no GetStat(DurationMultiplier) lookup anywhere.
-//   Duration Multiplier stat may be fully ignored for LOrb stuns.
-//
-// Log output lands in BepInEx/LogOutput.log under source "MBM.LOrb".
-// ─────────────────────────────────────────────────────────────────
-
-[HarmonyPatch(typeof(ItemLightningOrb), "ProcOnHitEffects")]
-static class Patch_LOrb_ProcOnHitEffects_Debug
-{
-    static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MBM.LOrb");
-
-    [HarmonyPrefix]
-    static void Prefix(DamageContainer dc)
-    {
-        if (dc == null) return;
-        bool lightningCheck = (int)dc.element == 1; // EElement.Lightning = 1
-        Log.LogInfo(
-            $"[LOrb.ProcOnHitEffects] " +
-            $"element={dc.element}({(int)dc.element}) " +
-            $"procCoeff={dc.procCoefficient:F3} " +
-            $"src=\"{dc.damageSource}\" " +
-            $"→ lightningGate={lightningCheck}");
-    }
-}
-
-// TryProcStun is only reached from ProcOnHitEffects after the element gate passes.
-// If this never logs while BT-Dagger fires, Bug A is confirmed.
-[HarmonyPatch]
-static class Patch_LOrb_TryProcStun_Debug
-{
-    static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MBM.LOrb");
-
-    static System.Reflection.MethodBase TargetMethod() =>
-        HarmonyLib.AccessTools.Method(typeof(ItemLightningOrb), "TryProcStun");
-
-    [HarmonyPrefix]
-    static void Prefix(DamageContainer dc, float overrideProcCoefficient)
-    {
-        string coeff = dc != null ? dc.procCoefficient.ToString("F3") : "null";
-        Log.LogInfo(
-            $"[LOrb.TryProcStun] " +
-            $"element={dc?.element}({(int)(dc?.element ?? 0)}) " +
-            $"procCoeff={coeff} " +
-            $"overrideCoeff={overrideProcCoefficient:F3}");
-    }
-}
-
 // ── Bluetooth Dagger element fix ─────────────────────────────────
 // HitTarget creates a DamageContainer locally and never sets dc.element = Lightning.
 // LightningBolt.TryInit does set it explicitly. This is a bug — BT Dagger should
@@ -1094,17 +1026,10 @@ static class Patch_LOrb_TryProcStun_Debug
 [HarmonyPatch(typeof(ProjectileBluetooth), "HitTarget")]
 static class Patch_BT_HitTarget_ElementFix
 {
-    static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MBM.LOrb");
-
     internal static bool Active;
 
     [HarmonyPrefix]
-    static void Prefix()
-    {
-        Active = true;
-        Log.LogInfo("[BT.HitTarget] fired — element fix active");
-    }
+    static void Prefix() => Active = true;
 
     [HarmonyPostfix]
     static void Postfix() => Active = false;
@@ -1130,21 +1055,6 @@ static class Patch_GetDamageContainer_BluetoothFix
         if (!Patch_BT_HitTarget_ElementFix.Active) return;
         if (__result == null) return;
         __result.element = (EElement)1; // EElement.Lightning
-    }
-}
-
-// Mirror for Lightning Staff — confirms it fires and element IS set inside TryInit.
-[HarmonyPatch(typeof(ProjectileLightningBolt), "TryInit")]
-static class Patch_LightningBolt_TryInit_Debug
-{
-    static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MBM.LOrb");
-
-    // Postfix fires after TryInit runs (element already written to DC and damage applied).
-    [HarmonyPostfix]
-    static void Postfix(bool __result)
-    {
-        Log.LogInfo($"[LightningBolt.TryInit] completed — hit={__result} (DC element was set to Lightning=1 inside TryInit)");
     }
 }
 
@@ -1320,13 +1230,9 @@ static class Patch_CreditCardGreen_Desc
 [HarmonyPatch(typeof(ItemBase), "GetDescription")]
 static class Patch_Backpack_Desc
 {
-    static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MBM.BackpackDesc");
-
     [HarmonyPostfix]
-    static void Postfix(ItemBase __instance, ref string __result)
+    static void Postfix(ref string __result)
     {
-        Log.LogInfo($"[GetDesc] type={__instance?.GetType().Name ?? "null"} result='{__result ?? "<null>"}'");
         if (__result == null) return;
         __result = __result
             .Replace("+1 Projectile Count", "+2 Projectile Count")
@@ -1444,10 +1350,13 @@ static class Patch_Zooma_Init_Projectiles
     static readonly System.Reflection.MethodInfo _setStat =
         HarmonyLib.AccessTools.Method(typeof(PassiveAbility), "SetStat");
 
+    static System.Action<int> _handler;
+
     [HarmonyPostfix]
     static void Postfix(PassiveAbilityZooma __instance)
     {
-        PlayerXp.A_LevelUp += new System.Action<int>(level =>
+        if (_handler != null) PlayerXp.A_LevelUp -= _handler;
+        _handler = level =>
         {
             try
             {
@@ -1458,7 +1367,8 @@ static class Patch_Zooma_Init_Projectiles
                 _setStat.Invoke(__instance, new object[] { mod });
             }
             catch { }
-        });
+        };
+        PlayerXp.A_LevelUp += _handler;
     }
 }
 
@@ -1592,10 +1502,35 @@ static class Patch_GameManager_OnDied_Chart
 
 // ─────────────────────────────────────────────────────────────────
 // COMBAT SCALING — 2× HP/damage ramp, knockback resistance → 0
-// Static field layout (from cctor):
-//   +0x0  speedMultiplicationPerMinute    0.025  (unchanged)
-//   +0x4  hpMultiplicationPerMinute       0.1  → 0.2
-//   +0x8  damageMultiplicationPerMinute   0.028 → 0.056
-//   +0xC  knockbackResistancePerMinute    0.028 → 0.0
+// IL2CPP static fields can't be set via reflection, so we patch the
+// public getter methods instead. Formula: scale = 1 + rate * minutes,
+// so doubling the rate = 2 * result - 1.
 // ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(CombatScaling), nameof(CombatScaling.GetStageHpMultiplier))]
+static class Patch_CombatScaling_HpMultiplier
+{
+    [HarmonyPostfix]
+    static void Postfix(ref float __result) => __result = 2f * __result - 1f;
+}
+
+[HarmonyPatch(typeof(CombatScaling), nameof(CombatScaling.GetStageDamageMultiplier))]
+static class Patch_CombatScaling_DamageMultiplier
+{
+    [HarmonyPostfix]
+    static void Postfix(ref float __result) => __result = 2f * __result - 1f;
+}
+
+[HarmonyPatch(typeof(CombatScaling), nameof(CombatScaling.GetKnockbackResistanceMultiplierAddition))]
+static class Patch_CombatScaling_KnockbackRes
+{
+    [HarmonyPostfix]
+    static void Postfix(ref float baseAddition, ref float swarmAddition, ref float stageAddition, ref float __result)
+    {
+        baseAddition  = 0f;
+        swarmAddition = 0f;
+        stageAddition = 0f;
+        __result      = 0f;
+    }
+}
 
