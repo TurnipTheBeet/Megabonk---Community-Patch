@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.9
+- Fix crash spam in GetKnockbackResistanceMultiplierAddition causing severe FPS drops during combat
+
 ## 1.3.8
 - Fix combat scaling (2× HP/damage ramp, knockback resistance removal) — was silently broken due to IL2CPP static field access bug
 - Remove leftover debug logging patches (Lightning Orb, Bluetooth Dagger, Backpack) that were causing significant per-frame log spam and GC pressure
