@@ -8,11 +8,11 @@ using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.13")]
+[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.12")]
 public class Plugin : BasePlugin
 {
-    internal static string LeaderboardServer = "http://67.5.111.0:9000";
-    internal const  string ModVersion        = "1.3.13";
+    internal static string LeaderboardServer = "http://megabonkcommunitypatch.duckdns.org:9000";
+    internal const  string ModVersion        = "1.3.12";
 
     internal const bool PatchGrandmasTonic = true;
 
@@ -29,7 +29,7 @@ public class Plugin : BasePlugin
     {
         Log = base.Log;
 
-        var cfgServer = Config.Bind("Leaderboard", "ServerUrl", "http://67.5.111.0:9000",
+        var cfgServer = Config.Bind("Leaderboard", "ServerUrl", "http://megabonkcommunitypatch.duckdns.org:9000",
             "DO NOT CHANGE THIS. Only modify if you are the server host running locally (use http://localhost:9000).");
         LeaderboardServer = cfgServer.Value;
 

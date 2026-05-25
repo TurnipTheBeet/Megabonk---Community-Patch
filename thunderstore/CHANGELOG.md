@@ -1,11 +1,10 @@
 # Changelog
 
-## 1.3.13
-- Golden Ring: boost drop rate from ~1/400 to ~1/128 (3× increase via extra Legendary draw chance)
-
 ## 1.3.12
 - Fix Grandma's Secret Tonic and Spicy Meatball stack caps (now enforced via loot pool, was silently ignored)
 - Fix Golden Ring not granting banishes when picked up normally (single-arg AddItem overload was unpatched)
+- Fix leaderboard crash when server returns 0 entries
+- Fix version check flagging newer local mod as outdated (now only warns when server required > local)
 
 ## 1.3.11
 - Key: chest open chance increased from 10% to 20% per stack

@@ -75,22 +75,6 @@ static class Patch_RunUnlockables_Init
             }
         }
 
-        // Golden Ring: boost drop rate ~1/400 → ~1/128 by adding extra copies to
-        // the Legendary pool. Selection within a rarity is uniform random, so
-        // 6 copies vs ~6 other Legendaries → ~50% of Legendary draws → ~1/123 per chest.
-        // List.Remove only removes the first occurrence, so each pickup consumes one copy.
-        if (avail.ContainsKey(EItemRarity.Legendary))
-        {
-            var legList = avail[EItemRarity.Legendary];
-            if (legList != null)
-            {
-                ItemData ring = null;
-                foreach (var item in legList)
-                    if (item.eItem == EItem.GoldenRing) { ring = item; break; }
-                if (ring != null)
-                    for (int i = 0; i < 5; i++) legList.Add(ring);
-            }
-        }
     }
 
     static void CacheAndApplyStatBlacklist()
@@ -1219,9 +1203,9 @@ static class LeaderboardInjector
         var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
         if (lb != all && lb != weekly) return;
 
-        if (_cache != null)
+        if (_cache != null && _cache.Length > 0)
             Replace(lb, _cache);
-        else
+        else if (_cache == null || _fetching)
             _pending = lb;
     }
 
@@ -1532,7 +1516,10 @@ static class Patch_MainMenu_Start_Version
                 if (doc.RootElement.TryGetProperty("required", out var req))
                 {
                     string required = req.GetString() ?? "";
-                    if (!string.IsNullOrEmpty(required) && required != Plugin.ModVersion)
+                    if (!string.IsNullOrEmpty(required) &&
+                        System.Version.TryParse(required, out var reqVer) &&
+                        System.Version.TryParse(Plugin.ModVersion, out var localVer) &&
+                        reqVer > localVer)
                     {
                         Log.LogWarning($"Mod outdated: local={Plugin.ModVersion} required={required}");
                         ModGui.MainThread.Enqueue(() => ModGui.UpdateAvailable = true);
