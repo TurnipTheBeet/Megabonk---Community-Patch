@@ -74,6 +74,23 @@ static class Patch_RunUnlockables_Init
                     item.maxAmount = item.maxAmountPerRun = 6;
             }
         }
+
+        // Golden Ring: boost drop rate ~1/400 → ~1/128 by adding extra copies to
+        // the Legendary pool. Selection within a rarity is uniform random, so
+        // 6 copies vs ~6 other Legendaries → ~50% of Legendary draws → ~1/123 per chest.
+        // List.Remove only removes the first occurrence, so each pickup consumes one copy.
+        if (avail.ContainsKey(EItemRarity.Legendary))
+        {
+            var legList = avail[EItemRarity.Legendary];
+            if (legList != null)
+            {
+                ItemData ring = null;
+                foreach (var item in legList)
+                    if (item.eItem == EItem.GoldenRing) { ring = item; break; }
+                if (ring != null)
+                    for (int i = 0; i < 5; i++) legList.Add(ring);
+            }
+        }
     }
 
     static void CacheAndApplyStatBlacklist()
@@ -898,36 +915,6 @@ static class Patch_GoldenRing_Remove
         {
             var inv = MapController.GetPlayerInventory(null);
             if (inv != null) inv.banishes = System.Math.Max(0, inv.banishes - 1);
-        }
-        catch { }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// GOLDEN RING — boost drop rate: Legendary ~1.62% → ~5.4% per chest
-// (approx 3.1× increase → GoldenRing goes from ~1/400 to ~1/128)
-// ─────────────────────────────────────────────────────────────────
-
-[HarmonyPatch(typeof(Rarity), "GetItemRarity")]
-static class Patch_GoldenRing_DropRate
-{
-    // Legendary base weight: 1.5 / 92.5 ≈ 1.62% per chest.
-    // ~7 Legendary items → GoldenRing ≈ 1/431 ≈ 1/400.
-    // Adding 3.9% extra Legendary chance → total ~5.4% → GoldenRing ≈ 1/128.
-    const float ExtraLegendaryChance = 0.039f;
-
-    [HarmonyPostfix]
-    static void Postfix(ref EItemRarity __result)
-    {
-        if (__result == EItemRarity.Legendary) return;
-        try
-        {
-            var items = RunUnlockables.availableItems;
-            if (items == null || !items.ContainsKey(EItemRarity.Legendary)) return;
-            var legList = items[EItemRarity.Legendary];
-            if (legList == null || legList.Count == 0) return;
-            if (Random.value < ExtraLegendaryChance)
-                __result = EItemRarity.Legendary;
         }
         catch { }
     }
