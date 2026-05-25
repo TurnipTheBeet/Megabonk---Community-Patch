@@ -122,6 +122,12 @@ All characters normalized to minimum 1.2× speed, jump 10, pickup range 10. Char
 
 ---
 
+## Discord
+
+Bug reports and feedback: https://discord.gg/BsqCqsX63u
+
+---
+
 ## Source
 
 https://github.com/TurnipTheBeet/Megabonk---Community-Patch

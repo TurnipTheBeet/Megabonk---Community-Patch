@@ -5,6 +5,7 @@
 - Fix Golden Ring not granting banishes when picked up normally (single-arg AddItem overload was unpatched)
 - Fix leaderboard crash when server returns 0 entries
 - Fix version check flagging newer local mod as outdated (now only warns when server required > local)
+- Fix stale server URL in config not updating after mod update
 
 ## 1.3.11
 - Key: chest open chance increased from 10% to 20% per stack
