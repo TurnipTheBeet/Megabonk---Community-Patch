@@ -140,7 +140,7 @@ static class Patch_MicrowaveItemButton_SelectUpgrade
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SIZE CAPS — Grandma's Secret Tonic (16 units) & Spicy Meatball (32 units)
+// SIZE CAP — Grandma's Secret Tonic (16 units)
 // Stack cap computed dynamically from baseRadius/radiusPerAmount so the max
 // stack count lands exactly at the size cap.
 // ─────────────────────────────────────────────────────────────────
@@ -164,30 +164,6 @@ static class Patch_GrandmasTonic_SizeCap
         if (radiusPerAmount <= 0f) return;
         int maxStacks = (int)System.Math.Ceiling((TargetMax - baseRadius) / radiusPerAmount);
         var data = DataManager.Instance?.GetItem(EItem.GrandmasSecretTonic);
-        if (data == null) return;
-        data.maxAmount = data.maxAmountPerRun = maxStacks;
-    }
-}
-
-[HarmonyPatch(typeof(ItemSpicyMeatball), "OnInitOrAmountChanged")]
-static class Patch_SpicyMeatball_SizeCap
-{
-    const float TargetMax = 16f;
-
-    [HarmonyPrefix]
-    static unsafe void Prefix(ItemSpicyMeatball __instance)
-    {
-        *(float*)(__instance.Pointer + 0x38) = TargetMax;
-    }
-
-    [HarmonyPostfix]
-    static unsafe void Postfix(ItemSpicyMeatball __instance)
-    {
-        float baseRadius      = *(float*)(__instance.Pointer + 0x30);
-        float radiusPerAmount = *(float*)(__instance.Pointer + 0x34);
-        if (radiusPerAmount <= 0f) return;
-        int maxStacks = (int)System.Math.Ceiling((TargetMax - baseRadius) / radiusPerAmount);
-        var data = DataManager.Instance?.GetItem(EItem.SpicyMeatball);
         if (data == null) return;
         data.maxAmount = data.maxAmountPerRun = maxStacks;
     }

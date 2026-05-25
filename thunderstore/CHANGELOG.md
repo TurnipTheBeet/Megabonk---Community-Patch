@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.7
+- Remove Spicy Meatball patch (was doubling max size from 8m to 16m, causing severe lag)
+
 ## 1.3.6
 - Fix forced pool items (Sucky Magnet etc.) not appearing in runs due to save deactivation state
 

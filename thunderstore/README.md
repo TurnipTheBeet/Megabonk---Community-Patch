@@ -30,7 +30,6 @@ A community-driven balance and quality-of-life mod for Megabonk.
 ## Item Tweaks
 
 - **Item Caps** — Anvil (max 2), Overpowered Lamp (max 3), Za Warudo (max 10)
-- **Spicy Meatball** — size capped at 16m; pool slot removed once cap is reached
 - **Grandma's Secret Tonic** — size capped at 16m; pool slot removed once cap is reached
 - **Brass Knuckles** — size cap removed
 - **Bob's Lantern** — fire rate doubled; rarity changed to Legendary
