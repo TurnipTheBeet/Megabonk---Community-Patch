@@ -29,8 +29,11 @@ public class Plugin : BasePlugin
     {
         Log = base.Log;
 
-        var cfgServer = Config.Bind("Leaderboard", "ServerUrl", "http://megabonkcommunitypatch.duckdns.org:9000",
+        var cfgServer = Config.Bind("Leaderboard", "ServerUrl", LeaderboardServer,
             "DO NOT CHANGE THIS. Only modify if you are the server host running locally (use http://localhost:9000).");
+        // Override stale IPs on update — preserve localhost override for server host
+        if (!cfgServer.Value.Contains("localhost"))
+            cfgServer.Value = LeaderboardServer;
         LeaderboardServer = cfgServer.Value;
 
         ClassInjector.RegisterTypeInIl2Cpp<ModGui>();
