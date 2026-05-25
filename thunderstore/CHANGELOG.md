@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.10
+- Fix knockback resistance scaling removal — replace crashing method patch with direct memory write
+
 ## 1.3.9
 - Fix crash spam in GetKnockbackResistanceMultiplierAddition causing severe FPS drops during combat
 

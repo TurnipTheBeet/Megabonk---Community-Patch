@@ -470,6 +470,27 @@ static class Patch_DataManager_Load
         }
 
 
+        // ── knockbackResistancePerMinute → 0 ──────────────────────────
+        // Decompile of GetKnockbackResistanceMultiplierAddition confirms:
+        //   static storage = *(longlong*)(classPtr + 0xB8)
+        //   knockbackResistancePerMinute at offset 0xC within storage
+        unsafe
+        {
+            try
+            {
+                var dmClass  = Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(__instance.Pointer);
+                var image    = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_image(dmClass);
+                var csClass  = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(image, "Assets.Scripts.Game.Combat", "CombatScaling");
+                if (csClass != System.IntPtr.Zero)
+                {
+                    var statics = *(System.IntPtr*)(csClass + 0xB8);
+                    if (statics != System.IntPtr.Zero)
+                        *(float*)(statics + 0xC) = 0f;
+                }
+            }
+            catch { }
+        }
+
         // Force non-toggleable items into the loot pool permanently.
         // isEnabled must be true — FUN_180405d10 checks it before inItemPool.
         // Some items (e.g. SuckyMagnet) ship with isEnabled=false in asset data.
@@ -1507,6 +1528,7 @@ static class Patch_GameManager_OnDied_Chart
 // so doubling the rate = 2 * result - 1.
 // ─────────────────────────────────────────────────────────────────
 
+
 [HarmonyPatch(typeof(CombatScaling), nameof(CombatScaling.GetStageHpMultiplier))]
 static class Patch_CombatScaling_HpMultiplier
 {
@@ -1521,16 +1543,4 @@ static class Patch_CombatScaling_DamageMultiplier
     static void Postfix(ref float __result) => __result = 2f * __result - 1f;
 }
 
-[HarmonyPatch(typeof(CombatScaling), nameof(CombatScaling.GetKnockbackResistanceMultiplierAddition))]
-static class Patch_CombatScaling_KnockbackRes
-{
-    [HarmonyPostfix]
-    static void Postfix(ref float baseAddition, ref float swarmAddition, ref float stageAddition, ref float __result)
-    {
-        baseAddition  = 0f;
-        swarmAddition = 0f;
-        stageAddition = 0f;
-        __result      = 0f;
-    }
-}
 
