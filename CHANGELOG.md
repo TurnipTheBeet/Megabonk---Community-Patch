@@ -1,25 +1,7 @@
 # Changelog
 
-## 1.3.13
-- Golden Ring: boost drop rate from ~1/400 to ~1/128 (3× increase via extra Legendary draw chance)
-
-## 1.3.12
-- Fix Grandma's Secret Tonic and Spicy Meatball stack caps (now enforced via loot pool, was silently ignored)
-- Fix Golden Ring not granting banishes when picked up normally (single-arg AddItem overload was unpatched)
-
-## 1.3.11
-- Key: chest open chance increased from 10% to 20% per stack
-- Cursed Doll: fix maxNumCursesPerCheck (was 5, now matches enemiesCursedPerDoll = 7)
-- Remove MaxHealth and PickupRange from stat blacklist
-
 ## 1.3.10
 - Fix knockback resistance scaling removal — replace crashing method patch with direct memory write
-- Grandma's Secret Tonic: force baseRadius=4, radiusPerAmount=2, maxRadius=16 (max 6 stacks)
-- Spicy Meatball: baseRadius=8, radiusPerAmount=4, maxRadius=32 (2× Grandma's values)
-- All weapons: +10% crit chance and +20% crit damage added to upgrade pool
-- Add MoveSpeedMultiplier to stat blacklist
-- Greed Shrine: fix XP bonus to use Addition modifier (matches Exp Tome bucket, no double-dip)
-- Remove Clock Powerup time-freeze patch (too strong)
 
 ## 1.3.9
 - Fix crash spam in GetKnockbackResistanceMultiplierAddition causing severe FPS drops during combat

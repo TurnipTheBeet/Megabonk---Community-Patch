@@ -23,13 +23,14 @@ A community-driven balance and quality-of-life mod for Megabonk.
 - **Pots** — drop a random powerup instead of always health
 - **Golden Ring** — grants +1 banish per ring held
 - **Greed Shrine** — also grants +5% XP and +5% luck
+- **Clock Powerup** — run timer is frozen during time freeze (mob spawns/scaling unaffected)
+
 ---
 
 ## Item Tweaks
 
 - **Item Caps** — Anvil (max 2), Overpowered Lamp (max 3), Za Warudo (max 10)
-- **Grandma's Secret Tonic** — baseRadius=4, radiusPerAmount=2, maxRadius=16m (max 6 stacks); pool slot removed once cap is reached
-- **Spicy Meatball** — baseRadius=8, radiusPerAmount=4, maxRadius=32m (2× Grandma's values)
+- **Grandma's Secret Tonic** — size capped at 16m; pool slot removed once cap is reached
 - **Brass Knuckles** — size cap removed
 - **Bob's Lantern** — fire rate doubled; rarity changed to Legendary
 - **Backpack** — grants +2 projectiles per stack instead of +1
@@ -39,7 +40,6 @@ A community-driven balance and quality-of-life mod for Megabonk.
 - **Tony McZooms** — Zap passive grants +0.25 projectiles per level
 - **Golden Shield** — removes reduced gold penalty on Kevin self-damage
 - **Bluetooth Dagger** — correctly triggers Lightning Orb stun (element fix)
-- **All Weapons** — +10% crit chance and +20% crit damage added to upgrade pool
 - **Bow / Revolver** — +2 projectiles per level upgrade instead of +1
 
 ---
@@ -68,18 +68,6 @@ A community-driven balance and quality-of-life mod for Megabonk.
 ## Stat Blacklists
 
 Excludes broken/junk stats from Chaos rolls, Gamble Tome, Dicehead passive, and Charge Shrines. Hardcoded — not user-configurable.
-
-| Stat | Reason |
-|------|--------|
-| HealthRegen | Trivial defensive stat |
-| Shield | Trivial defensive stat |
-| Thorns | Trivial defensive stat |
-| Armor | Trivial defensive stat |
-| Evasion | Trivial defensive stat |
-| DurationMultiplier | Low impact |
-| ProjectileSpeedMultiplier | Low impact |
-| KnockbackMultiplier | Low impact |
-| MoveSpeedMultiplier | Low impact |
 
 ---
 

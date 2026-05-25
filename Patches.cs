@@ -67,9 +67,13 @@ static class Patch_RunUnlockables_Init
                     item.maxAmount = Plugin.GetItemCap(item.eItem);
                     item.maxAmountPerRun = 9999;
                 }
+                // Cap Grandma's (6 stacks) and Meatball (6 stacks) via pool directly
+                if (item.eItem == EItem.GrandmasSecretTonic)
+                    item.maxAmount = item.maxAmountPerRun = 6;
+                if (item.eItem == EItem.SpicyMeatball)
+                    item.maxAmount = item.maxAmountPerRun = 6;
             }
         }
-
     }
 
     static void CacheAndApplyStatBlacklist()
@@ -140,32 +144,64 @@ static class Patch_MicrowaveItemButton_SelectUpgrade
 }
 
 // ─────────────────────────────────────────────────────────────────
-// SIZE CAP — Grandma's Secret Tonic (16 units)
-// Stack cap computed dynamically from baseRadius/radiusPerAmount so the max
-// stack count lands exactly at the size cap.
+// SIZE CAP — Grandma's Secret Tonic
+// Force baseRadius=4, radiusPerAmount=2, maxRadius=16 → max 6 stacks.
 // ─────────────────────────────────────────────────────────────────
 
 [HarmonyPatch(typeof(ItemGrandmasSecretTonic), "OnInitOrAmountChanged")]
 static class Patch_GrandmasTonic_SizeCap
 {
-    const float TargetMax = 16f;
+    const float BaseRadius      = 4f;
+    const float RadiusPerAmount = 2f;
+    const float MaxRadius       = 16f;
+    const int   MaxStacks       = 6;   // (16-4)/2
 
     [HarmonyPrefix]
     static unsafe void Prefix(ItemGrandmasSecretTonic __instance)
     {
-        *(float*)(__instance.Pointer + 0x3C) = TargetMax;
+        // Set maxRadius before the method runs so it uses our cap
+        *(float*)(__instance.Pointer + 0x3C) = MaxRadius;
     }
 
     [HarmonyPostfix]
     static unsafe void Postfix(ItemGrandmasSecretTonic __instance)
     {
-        float baseRadius      = *(float*)(__instance.Pointer + 0x34);
-        float radiusPerAmount = *(float*)(__instance.Pointer + 0x38);
-        if (radiusPerAmount <= 0f) return;
-        int maxStacks = (int)System.Math.Ceiling((TargetMax - baseRadius) / radiusPerAmount);
-        var data = DataManager.Instance?.GetItem(EItem.GrandmasSecretTonic);
-        if (data == null) return;
-        data.maxAmount = data.maxAmountPerRun = maxStacks;
+        // Force all radius fields to our desired values
+        *(float*)(__instance.Pointer + 0x34) = BaseRadius;
+        *(float*)(__instance.Pointer + 0x38) = RadiusPerAmount;
+        *(float*)(__instance.Pointer + 0x3C) = MaxRadius;
+        int amount = *(int*)(__instance.Pointer + 0x18);
+        *(float*)(__instance.Pointer + 0x40) =
+            System.Math.Min(BaseRadius + amount * RadiusPerAmount, MaxRadius);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SPICY MEATBALL — 2× Grandma's values (base=8, perAmount=4, max=32)
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ItemSpicyMeatball), "OnInitOrAmountChanged")]
+static class Patch_SpicyMeatball_Radius
+{
+    const float BaseRadius      = 8f;
+    const float RadiusPerAmount = 4f;
+    const float MaxRadius       = 32f;
+
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemSpicyMeatball __instance)
+    {
+        *(float*)(__instance.Pointer + 0x38) = MaxRadius;
+    }
+
+    [HarmonyPostfix]
+    static unsafe void Postfix(ItemSpicyMeatball __instance)
+    {
+        *(float*)(__instance.Pointer + 0x30) = BaseRadius;
+        *(float*)(__instance.Pointer + 0x34) = RadiusPerAmount;
+        *(float*)(__instance.Pointer + 0x38) = MaxRadius;
+        int amount = *(int*)(__instance.Pointer + 0x18);
+        *(float*)(__instance.Pointer + 0x3C) = System.Math.Min(
+            BaseRadius + amount * RadiusPerAmount, MaxRadius);
     }
 }
 
@@ -180,6 +216,31 @@ static class Patch_BobLantern_FireRate
     static unsafe void Postfix(ItemBobLantern __instance)
     {
         *(float*)(__instance.Pointer + 0x3C) /= 2f;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// KEY — 20% chest open chance per stack (was 10%)
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ItemKey), "OnInitOrAmountChanged")]
+static class Patch_ItemKey_Chance
+{
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemKey __instance)
+    {
+        *(float*)(__instance.Pointer + 0x30) = 0.2f; // chancePerStack  0.1 → 0.2
+    }
+}
+
+[HarmonyPatch(typeof(ItemKey), "GetDescription")]
+static class Patch_ItemKey_Desc
+{
+    [HarmonyPostfix]
+    static void Postfix(ref string __result)
+    {
+        if (__result != null)
+            __result = __result.Replace("10%", "20%");
     }
 }
 
@@ -348,8 +409,8 @@ static class Patch_DataManager_Load
                 weapons[i].canAlwaysToggle = true;
                 var ud = weapons[i].upgradeData;
                 if (ud?.upgradeModifiers == null) continue;
-                AddUpgradeStat(ud.upgradeModifiers, (EStat)18, 0.05f);
-                AddUpgradeStat(ud.upgradeModifiers, (EStat)19, 0.25f);
+                AddUpgradeStat(ud.upgradeModifiers, (EStat)18, 0.10f);
+                AddUpgradeStat(ud.upgradeModifiers, (EStat)19, 0.20f);
                 RemoveStat(ud.upgradeModifiers, 24);
             }
 
@@ -727,17 +788,17 @@ static class Patch_ShrineGreed_Stats
     static void Postfix(InteractableShrineGreed __instance)
     {
         if (!_wasNotDone || !__instance.done) return;
-        Apply(EStat.XpIncreaseMultiplier, 0.05f);
-        Apply(EStat.Luck,                 0.05f);
+        Apply(EStat.XpIncreaseMultiplier, 0.05f, EStatModifyType.Addition);
+        Apply(EStat.Luck,                 0.05f, EStatModifyType.Flat);
     }
 
-    static void Apply(EStat stat, float amount)
+    static void Apply(EStat stat, float amount, EStatModifyType modType = EStatModifyType.Flat)
     {
         try
         {
             var mod = new StatModifier();
             mod.stat         = stat;
-            mod.modifyType   = EStatModifyType.Flat;
+            mod.modifyType   = modType;
             mod.modification = amount;
             var effect = new EffectStat();
             effect.effectType   = EEncounterEffect.StatChange;
@@ -803,8 +864,24 @@ static class Patch_GoldenRing_Add
         if (eItem != EItem.GoldenRing) return;
         try
         {
-            var inv = MapController.GetPlayerInventory(null);
+            var inv = GameManager.Instance?.GetPlayerInventory();
             if (inv != null) inv.banishes += count;
+        }
+        catch { }
+    }
+}
+
+[HarmonyPatch(typeof(ItemInventory), "AddItem", typeof(EItem))]
+static class Patch_GoldenRing_Add_Single
+{
+    [HarmonyPostfix]
+    static void Postfix(EItem eItem)
+    {
+        if (eItem != EItem.GoldenRing) return;
+        try
+        {
+            var inv = GameManager.Instance?.GetPlayerInventory();
+            if (inv != null) inv.banishes += 1;
         }
         catch { }
     }
@@ -821,6 +898,36 @@ static class Patch_GoldenRing_Remove
         {
             var inv = MapController.GetPlayerInventory(null);
             if (inv != null) inv.banishes = System.Math.Max(0, inv.banishes - 1);
+        }
+        catch { }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// GOLDEN RING — boost drop rate: Legendary ~1.62% → ~5.4% per chest
+// (approx 3.1× increase → GoldenRing goes from ~1/400 to ~1/128)
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Rarity), "GetItemRarity")]
+static class Patch_GoldenRing_DropRate
+{
+    // Legendary base weight: 1.5 / 92.5 ≈ 1.62% per chest.
+    // ~7 Legendary items → GoldenRing ≈ 1/431 ≈ 1/400.
+    // Adding 3.9% extra Legendary chance → total ~5.4% → GoldenRing ≈ 1/128.
+    const float ExtraLegendaryChance = 0.039f;
+
+    [HarmonyPostfix]
+    static void Postfix(ref EItemRarity __result)
+    {
+        if (__result == EItemRarity.Legendary) return;
+        try
+        {
+            var items = RunUnlockables.availableItems;
+            if (items == null || !items.ContainsKey(EItemRarity.Legendary)) return;
+            var legList = items[EItemRarity.Legendary];
+            if (legList == null || legList.Count == 0) return;
+            if (Random.value < ExtraLegendaryChance)
+                __result = EItemRarity.Legendary;
         }
         catch { }
     }
@@ -1274,6 +1381,7 @@ static class Patch_CursedDoll_Buff
         int amount = *(int*)(p + 0x18);          // ItemBase.amount
         *(float*)(p + 0x34) = 0.5f;              // damageMaxHpPercentage  0.3 → 0.5
         *(int*)(p + 0x38)   = 7;                 // enemiesCursedPerDoll   2   → 7
+        *(int*)(p + 0x3C)   = 7;                 // maxNumCursesPerCheck   5   → 7
         *(int*)(p + 0x30)   = 7 * amount;        // maxNumCursedEnemies    recalc
     }
 }
@@ -1405,32 +1513,6 @@ static class Patch_GoldenShield_NoKevinReduction
     {
         if (dc != null && dc.damageSource == ItemKevin.damageSource)
             dc.damageSource = "";
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────
-// CLOCK POWERUP — freeze run timer while TimeFreeze is active
-// Only runTimer is frozen; stageTimer/difficultyTimer/etc. keep ticking
-// so mob spawning and difficulty scaling are unaffected.
-// ─────────────────────────────────────────────────────────────────
-
-[HarmonyPatch(typeof(MyTime), "Update")]
-static class Patch_MyTime_Update_ClockTimer
-{
-    static float _savedStageTimer;
-
-    [HarmonyPrefix]
-    static void Prefix()
-    {
-        _savedStageTimer = MyTime.stageTimer;
-    }
-
-    [HarmonyPostfix]
-    static void Postfix()
-    {
-        var inv = GameManager.Instance?.GetPlayerInventory();
-        if (inv?.statusEffects?.HasStatusEffect(EStatusEffect.TimeFreeze) ?? false)
-            MyTime.stageTimer = _savedStageTimer;
     }
 }
 
