@@ -79,7 +79,6 @@ Excludes broken/junk stats from Chaos rolls, Gamble Tome, Dicehead passive, and 
 | DurationMultiplier | Low impact |
 | ProjectileSpeedMultiplier | Low impact |
 | KnockbackMultiplier | Low impact |
-| MoveSpeedMultiplier | Low impact |
 
 ---
 

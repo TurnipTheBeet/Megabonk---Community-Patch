@@ -4,6 +4,7 @@ using UnityEngine;
 using TMPro;
 using Assets.Scripts.Utility;
 using Il2CppInterop.Runtime;
+using System.Runtime.InteropServices;
 
 using Assets.Scripts.Steam;
 using Assets.Scripts.Steam.LeaderboardsNew;
@@ -72,6 +73,7 @@ static class Patch_RunUnlockables_Init
                     item.maxAmount = item.maxAmountPerRun = 6;
                 if (item.eItem == EItem.SpicyMeatball)
                     item.maxAmount = item.maxAmountPerRun = 6;
+
             }
         }
 
@@ -553,6 +555,8 @@ static class Patch_DataManager_Load
             catch { }
         }
 
+        PatchGoldenRingChance();
+
         // Force non-toggleable items into the loot pool permanently.
         // isEnabled must be true — FUN_180405d10 checks it before inItemPool.
         // Some items (e.g. SuckyMagnet) ship with isEnabled=false in asset data.
@@ -561,6 +565,38 @@ static class Patch_DataManager_Load
             var data = __instance.GetItem(eItem);
             if (data != null) { data.inItemPool = true; data.isEnabled = true; }
         }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool VirtualProtect(System.IntPtr lpAddress, nuint dwSize, uint flNewProtect, out uint lpflOldProtect);
+
+    static unsafe void PatchGoldenRingChance()
+    {
+        try
+        {
+            const long  Rva           = 0x262ef30L;
+            const float ExpectedValue = 0.0025f;
+            const float NewValue      = 1f / 128f; // 0.0078125 (1/128)
+
+            System.IntPtr gameBase = System.IntPtr.Zero;
+            foreach (System.Diagnostics.ProcessModule m in System.Diagnostics.Process.GetCurrentProcess().Modules)
+                if (m.ModuleName.Equals("GameAssembly.dll", System.StringComparison.OrdinalIgnoreCase))
+                    { gameBase = m.BaseAddress; break; }
+
+            if (gameBase == System.IntPtr.Zero)
+                { Plugin.Log.LogError("[GoldenRing] GameAssembly.dll not found in process modules"); return; }
+
+            var addr    = new System.IntPtr(gameBase.ToInt64() + Rva);
+            float current = *(float*)addr;
+            if (System.Math.Abs(current - ExpectedValue) > 0.0001f)
+                { Plugin.Log.LogWarning($"[GoldenRing] Chance constant unexpected ({current}), skipping patch"); return; }
+
+            VirtualProtect(addr, 4, 0x04, out uint oldProtect);
+            *(float*)addr = NewValue;
+            VirtualProtect(addr, 4, oldProtect, out _);
+            Plugin.Log.LogInfo($"[GoldenRing] Chest drop chance patched: 1/400 → 1/128");
+        }
+        catch (System.Exception ex) { Plugin.Log.LogError($"[GoldenRing] Patch failed: {ex.Message}"); }
     }
 
     static unsafe void RemoveStat(Il2CppSystem.Collections.Generic.List<StatModifier> mods, int statInt)

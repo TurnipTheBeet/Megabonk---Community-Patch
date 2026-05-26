@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.13
+- Golden Ring: chest drop chance increased from 1/400 to 1/128
+- Remove MoveSpeedMultiplier from stat blacklists (Chaos, Gamble Tome, Dicehead, Charge Shrines)
+
 ## 1.3.12
 - Fix Grandma's Secret Tonic and Spicy Meatball stack caps (now enforced via loot pool, was silently ignored)
 - Fix Golden Ring not granting banishes when picked up normally (single-arg AddItem overload was unpatched)
