@@ -26,6 +26,8 @@ using Assets.Scripts.Inventory__Items__Pickups.Stats;
 using Assets.Scripts.Saves___Serialization.Progression.Unlocks;
 using Assets.Scripts.Saves___Serialization.Progression.Achievements;
 using Actors.Enemies;
+using Assets.Scripts.Actors.Enemies;
+using Assets.Scripts.Actors.Player;
 using Assets.Scripts.Managers;
 using Assets.Scripts.Inventory.Stats;
 using Assets.Scripts.Actors;
@@ -35,6 +37,7 @@ using Assets.Scripts.Inventory__Items__Pickups.AbilitiesPassive.Implementations;
 using Inventory__Items__Pickups.Xp_and_Levels;
 using Assets.Scripts.Inventory__Items__Pickups.Weapons;
 using Assets.Scripts.Settings___Saves.SaveFiles;
+using Assets.Scripts.Objects.Particles___Effects.ParticleOpacity;
 
 namespace MegaBonkMod;
 
@@ -169,13 +172,15 @@ static class Patch_GrandmasTonic_SizeCap
     [HarmonyPostfix]
     static unsafe void Postfix(ItemGrandmasSecretTonic __instance)
     {
-        // Force all radius fields to our desired values
+        // Read game's computed radius (includes size stat) before we overwrite it
+        float gameRadius = *(float*)(__instance.Pointer + 0x40);
         *(float*)(__instance.Pointer + 0x34) = BaseRadius;
         *(float*)(__instance.Pointer + 0x38) = RadiusPerAmount;
         *(float*)(__instance.Pointer + 0x3C) = MaxRadius;
         int amount = *(int*)(__instance.Pointer + 0x18);
-        *(float*)(__instance.Pointer + 0x40) =
-            System.Math.Min(BaseRadius + amount * RadiusPerAmount, MaxRadius);
+        *(float*)(__instance.Pointer + 0x40) = System.Math.Min(BaseRadius + amount * RadiusPerAmount, MaxRadius);
+        if (gameRadius >= MaxRadius)
+            SizeCapHelper.RemoveFromPool(EItem.GrandmasSecretTonic);
     }
 }
 
@@ -199,12 +204,30 @@ static class Patch_SpicyMeatball_Radius
     [HarmonyPostfix]
     static unsafe void Postfix(ItemSpicyMeatball __instance)
     {
+        // Read game's computed radius (includes size stat) before we overwrite it
+        float gameRadius = *(float*)(__instance.Pointer + 0x3C);
         *(float*)(__instance.Pointer + 0x30) = BaseRadius;
         *(float*)(__instance.Pointer + 0x34) = RadiusPerAmount;
         *(float*)(__instance.Pointer + 0x38) = MaxRadius;
         int amount = *(int*)(__instance.Pointer + 0x18);
-        *(float*)(__instance.Pointer + 0x3C) = System.Math.Min(
-            BaseRadius + amount * RadiusPerAmount, MaxRadius);
+        *(float*)(__instance.Pointer + 0x3C) = System.Math.Min(BaseRadius + amount * RadiusPerAmount, MaxRadius);
+        if (gameRadius >= MaxRadius)
+            SizeCapHelper.RemoveFromPool(EItem.SpicyMeatball);
+    }
+}
+
+static class SizeCapHelper
+{
+    internal static void RemoveFromPool(EItem eItem)
+    {
+        var avail = RunUnlockables.availableItems;
+        if (avail == null) return;
+        foreach (var kvp in avail)
+        {
+            if (kvp.Value == null) continue;
+            for (int i = kvp.Value.Count - 1; i >= 0; i--)
+                if (kvp.Value[i]?.eItem == eItem) { kvp.Value.RemoveAt(i); return; }
+        }
     }
 }
 
@@ -555,8 +578,6 @@ static class Patch_DataManager_Load
             catch { }
         }
 
-        PatchGoldenRingChance();
-
         // Force non-toggleable items into the loot pool permanently.
         // isEnabled must be true — FUN_180405d10 checks it before inItemPool.
         // Some items (e.g. SuckyMagnet) ship with isEnabled=false in asset data.
@@ -565,38 +586,6 @@ static class Patch_DataManager_Load
             var data = __instance.GetItem(eItem);
             if (data != null) { data.inItemPool = true; data.isEnabled = true; }
         }
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    static extern bool VirtualProtect(System.IntPtr lpAddress, nuint dwSize, uint flNewProtect, out uint lpflOldProtect);
-
-    static unsafe void PatchGoldenRingChance()
-    {
-        try
-        {
-            const long  Rva           = 0x262ef30L;
-            const float ExpectedValue = 0.0025f;
-            const float NewValue      = 1f / 128f; // 0.0078125 (1/128)
-
-            System.IntPtr gameBase = System.IntPtr.Zero;
-            foreach (System.Diagnostics.ProcessModule m in System.Diagnostics.Process.GetCurrentProcess().Modules)
-                if (m.ModuleName.Equals("GameAssembly.dll", System.StringComparison.OrdinalIgnoreCase))
-                    { gameBase = m.BaseAddress; break; }
-
-            if (gameBase == System.IntPtr.Zero)
-                { Plugin.Log.LogError("[GoldenRing] GameAssembly.dll not found in process modules"); return; }
-
-            var addr    = new System.IntPtr(gameBase.ToInt64() + Rva);
-            float current = *(float*)addr;
-            if (System.Math.Abs(current - ExpectedValue) > 0.0001f)
-                { Plugin.Log.LogWarning($"[GoldenRing] Chance constant unexpected ({current}), skipping patch"); return; }
-
-            VirtualProtect(addr, 4, 0x04, out uint oldProtect);
-            *(float*)addr = NewValue;
-            VirtualProtect(addr, 4, oldProtect, out _);
-            Plugin.Log.LogInfo($"[GoldenRing] Chest drop chance patched: 1/400 → 1/128");
-        }
-        catch (System.Exception ex) { Plugin.Log.LogError($"[GoldenRing] Patch failed: {ex.Message}"); }
     }
 
     static unsafe void RemoveStat(Il2CppSystem.Collections.Generic.List<StatModifier> mods, int statInt)
@@ -627,6 +616,63 @@ static class Patch_DataManager_Load
         m.modifyType   = EStatModifyType.Flat;
         m.modification = modification;
         mods.Add(m);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// CLOCK POWERUP — stage timer ticks at half rate during TimeFreeze
+// stageTimer advances normally during time stops; subtract half each frame.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(MyTime), "Update")]
+static class Patch_MyTime_Update_SlowStageTimer
+{
+    static System.IntPtr _statics  = System.IntPtr.Zero;
+    static float         _preTick;
+    static bool          _active;
+
+    static unsafe System.IntPtr GetStatics()
+    {
+        if (_statics != System.IntPtr.Zero) return _statics;
+        var dm = DataManager.Instance;
+        if (dm == null) return System.IntPtr.Zero;
+        var image = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_image(
+                        Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dm.Pointer));
+        var cls   = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(
+                        image, "Assets.Scripts.Utility", "MyTime");
+        if (cls == System.IntPtr.Zero) return System.IntPtr.Zero;
+        _statics = *(System.IntPtr*)(cls + 0xB8);
+        return _statics;
+    }
+
+    [HarmonyPrefix]
+    static unsafe void Prefix()
+    {
+        _active = false;
+        try
+        {
+            if (GameManager.Instance?.IsTimeFreeze() != true) return;
+            var statics = GetStatics();
+            if (statics == System.IntPtr.Zero) return;
+            _preTick = *(float*)(statics + 0x1C); // snapshot stageTimer
+            _active  = true;
+        }
+        catch { }
+    }
+
+    [HarmonyPostfix]
+    static unsafe void Postfix()
+    {
+        if (!_active) return;
+        try
+        {
+            var statics = GetStatics();
+            if (statics == System.IntPtr.Zero) return;
+            float after   = *(float*)(statics + 0x1C);
+            float advance = after - _preTick;
+            *(float*)(statics + 0x1C) = _preTick + advance * 0.5f; // half rate, only stageTimer
+        }
+        catch { }
     }
 }
 
@@ -1634,5 +1680,98 @@ static class Patch_CombatScaling_DamageMultiplier
     [HarmonyPostfix]
     static void Postfix(ref float __result) => __result = 2f * __result - 1f;
 }
+
+// ─────────────────────────────────────────────────────────────────
+// CACTUS — numProjectilesPerAmount = 4; ray distance scales with size
+// ─────────────────────────────────────────────────────────────────
+
+// Force numProjectilesPerAmount before the game computes numProjectiles
+[HarmonyPatch(typeof(ItemCactus), "OnInitOrAmountChanged")]
+static class Patch_Cactus_OnInitOrAmountChanged
+{
+    static readonly BepInEx.Logging.ManualLogSource CactusLog =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.CactusDump");
+
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemCactus __instance)
+    {
+        *(int*)(__instance.Pointer + 0x34) = 4; // numProjectilesPerAmount
+    }
+
+    [HarmonyPostfix]
+    static unsafe void Postfix(ItemCactus __instance)
+    {
+        // DIAGNOSTIC: dump int and float values at offsets 0x30–0x70
+        var sb = new System.Text.StringBuilder();
+        sb.Append("[CactusDump] offsets:");
+        for (int off = 0x28; off <= 0x70; off += 4)
+        {
+            int   asInt   = *(int*)  (__instance.Pointer + off);
+            float asFloat = *(float*)(__instance.Pointer + off);
+            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
+        }
+        CactusLog.LogInfo(sb.ToString());
+    }
+}
+
+// Scale visual thorn range with player SizeMultiplier.
+// ParticleOpacity.Awake fires when CactusProjectile is instantiated,
+// before the particle system emits its burst — ideal time to scale startSpeed and velocity cap.
+[HarmonyPatch(typeof(ParticleOpacity), "Awake")]
+static class Patch_CactusProjectile_ScaleParticles
+{
+    static readonly BepInEx.Logging.ManualLogSource Log =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.Cactus");
+
+    [HarmonyPostfix]
+    static void Postfix(ParticleOpacity __instance)
+    {
+        try
+        {
+            string goName = __instance.gameObject.name;
+
+            // Guard: only affect CactusProjectile instances
+            if (!goName.Contains("Cactus"))
+            {
+                Log.LogDebug($"[CactusPS] Awake on non-cactus GO '{goName}' — skipped");
+                return;
+            }
+
+            var psSystems = __instance.particleSystems;
+            int psCount = psSystems?.Length ?? -1;
+
+            float sizeMult = 1f;
+            try { sizeMult = PlayerStats.GetStat(EStat.SizeMultiplier); }
+            catch (System.Exception ex) { Log.LogError($"[CactusPS] GetStat threw: {ex.Message}"); }
+            if (sizeMult <= 0f) sizeMult = 1f;
+
+            Log.LogInfo($"[CactusPS] Awake '{goName}' psCount={psCount} sizeMult={sizeMult:F3}");
+
+            if (psSystems == null || psSystems.Length == 0) return;
+            if (System.Math.Abs(sizeMult - 1f) < 0.01f) return; // base size, nothing to do
+
+            for (int i = 0; i < psSystems.Length; i++)
+            {
+                var ps = psSystems[i];
+                if (ps == null) continue;
+
+                // Scale both launch speed and lifetime proportionally.
+                // Together they scale visual range ≈ linearly with sizeMult:
+                //   higher startSpeed = more distance in initial burst frames
+                //   longer lifetime   = more travel time at residual velocity
+                var main = ps.main;
+                main.startSpeedMultiplier    = sizeMult;
+                main.startLifetimeMultiplier = sizeMult;
+                Log.LogInfo($"[CactusPS] Applied speedMult={sizeMult:F3} lifetimeMult={sizeMult:F3}");
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Plugin.Log.LogError($"[CactusPS] Exception: {ex}");
+        }
+    }
+}
+
+
 
 

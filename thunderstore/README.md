@@ -130,3 +130,9 @@ Bug reports and feedback: https://discord.gg/BsqCqsX63u
 ## Source
 
 https://github.com/TurnipTheBeet/Megabonk---Community-Patch
+
+---
+
+## AI Disclosure
+
+This mod was developed with AI assistance (Claude by Anthropic).
