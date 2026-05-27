@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.15
+- Fix Key and Echo Shard missing from loot pool (save deactivation state was not overridden)
+- Diagnostic logging added for Backpack, Brass Knuckles, Cursed Doll offset verification
+
 ## 1.3.14
 - Remove VirtualProtect usage (Thunderstore TOS compliance)
 - Golden Ring chest drop chance reverts to 1/400 (will be restored via Harmony patch in a future update)

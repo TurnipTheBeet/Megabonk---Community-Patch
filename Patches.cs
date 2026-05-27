@@ -277,10 +277,28 @@ static class Patch_ItemKey_Desc
 [HarmonyPatch(typeof(ItemBrassKnuckles), "OnInitOrAmountChanged")]
 static class Patch_BrassKnuckles_SizeCap
 {
+    static readonly BepInEx.Logging.ManualLogSource BKLog =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.BrassKnucklesDump");
+
     [HarmonyPrefix]
     static unsafe void Prefix(ItemBrassKnuckles __instance)
     {
         *(float*)(__instance.Pointer + 0x38) = float.MaxValue;
+    }
+
+    [HarmonyPostfix]
+    static unsafe void Postfix(ItemBrassKnuckles __instance)
+    {
+        // DIAGNOSTIC: dump offsets to verify 0x38 is actually maxRadius/sizeCap
+        var sb = new System.Text.StringBuilder();
+        sb.Append("[BrassKnucklesDump] offsets:");
+        for (int off = 0x18; off <= 0x60; off += 4)
+        {
+            int   asInt   = *(int*)  (__instance.Pointer + off);
+            float asFloat = *(float*)(__instance.Pointer + off);
+            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
+        }
+        BKLog.LogInfo(sb.ToString());
     }
 }
 
@@ -291,11 +309,14 @@ static class Patch_BrassKnuckles_SizeCap
 [HarmonyPatch(typeof(ItemBackpack), "OnInitOrAmountChanged")]
 static class Patch_ItemBackpack_Projectiles
 {
+    static readonly BepInEx.Logging.ManualLogSource BackpackLog =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.BackpackDump");
+
     [HarmonyPrefix]
     static unsafe void Prefix(ItemBackpack __instance)
     {
-        // The method reads amount at 0x18 and uses it directly as the projectile modifier.
-        // Double it so each stack gives +2 instead of +1.
+        // HACK: doubles amount so game computes 2x projectiles. Locale-broken if projPerAmount
+        // is parsed as 0 in non-English locales. Dump below will let us find projPerAmount offset.
         *(int*)(__instance.Pointer + 0x18) *= 2;
     }
 
@@ -303,6 +324,17 @@ static class Patch_ItemBackpack_Projectiles
     static unsafe void Postfix(ItemBackpack __instance)
     {
         *(int*)(__instance.Pointer + 0x18) /= 2;
+
+        // DIAGNOSTIC: dump offsets to find projPerAmount
+        var sb = new System.Text.StringBuilder();
+        sb.Append("[BackpackDump] offsets:");
+        for (int off = 0x18; off <= 0x60; off += 4)
+        {
+            int   asInt   = *(int*)  (__instance.Pointer + off);
+            float asFloat = *(float*)(__instance.Pointer + off);
+            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
+        }
+        BackpackLog.LogInfo(sb.ToString());
     }
 }
 
@@ -1071,6 +1103,16 @@ static class Patch_Leaderboard_UploadDirect
     static bool Prefix() => false;
 }
 
+// Fourth block — raw Steamworks interop layer.
+// Catches anything that bypasses the three managed blocks above,
+// including CheckUploadQueue calling ISteamUserStats directly.
+[HarmonyPatch(typeof(Steamworks.SteamUserStats), "UploadLeaderboardScore")]
+static class Patch_Leaderboard_SteamRaw
+{
+    [HarmonyPrefix]
+    static bool Prefix() => false;
+}
+
 // CanShowScore validates details[] — bypass entirely since all entries come from our server.
 // Do not bind int[] param — IL2CPP passes Il2CppStructArray which won't match and causes faults.
 [HarmonyPatch(typeof(Leaderboards), "CanShowScore")]
@@ -1136,8 +1178,11 @@ static class Patch_OnDownloadResultsFriends
         var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
         if (__instance != all && __instance != weekly) return;
         var cache = LeaderboardInjector.CachedEntries;
-        if (cache == null || cache.Length == 0) return;
-        __instance.friendsEntries = LeaderboardInjector.BuildFriendsList(cache);
+        // Always replace — never leave Steam friends data visible.
+        // Empty list if server cache not ready; filtered server data if it is.
+        __instance.friendsEntries = cache != null && cache.Length > 0
+            ? LeaderboardInjector.BuildFriendsList(cache)
+            : new Il2CppSystem.Collections.Generic.List<LeaderboardEntry>();
     }
 }
 
@@ -1287,8 +1332,16 @@ static class LeaderboardInjector
 
         if (_cache != null && _cache.Length > 0)
             Replace(lb, _cache);
-        else if (_cache == null || _fetching)
+        else
+        {
+            // Server data not ready yet — wipe Steam entries immediately so no Steam
+            // scores are ever visible. Re-invoke A_LeaderboardReady to push the empty
+            // list to UI. Replace() will re-invoke once server data arrives via _pending.
+            lb.globalEntries  = new Il2CppSystem.Collections.Generic.List<LeaderboardEntry>();
+            lb.friendsEntries = new Il2CppSystem.Collections.Generic.List<LeaderboardEntry>();
             _pending = lb;
+            try { SteamLeaderboardNew.A_LeaderboardReady?.Invoke(lb); } catch { }
+        }
     }
 
     private static void Replace(SteamLeaderboardNew lb, ServerEntry[] entries)
@@ -1427,6 +1480,9 @@ static class Patch_Backpack_Desc
 [HarmonyPatch(typeof(ItemCursedDoll), "OnInitOrAmountChanged")]
 static class Patch_CursedDoll_Buff
 {
+    static readonly BepInEx.Logging.ManualLogSource CDLog =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.CursedDollDump");
+
     [HarmonyPostfix]
     static unsafe void Postfix(ItemCursedDoll __instance)
     {
@@ -1436,6 +1492,17 @@ static class Patch_CursedDoll_Buff
         *(int*)(p + 0x38)   = 7;                 // enemiesCursedPerDoll   2   → 7
         *(int*)(p + 0x3C)   = 7;                 // maxNumCursesPerCheck   5   → 7
         *(int*)(p + 0x30)   = 7 * amount;        // maxNumCursedEnemies    recalc
+
+        // DIAGNOSTIC: dump offsets to verify all CursedDoll field offsets
+        var sb = new System.Text.StringBuilder();
+        sb.Append("[CursedDollDump] offsets:");
+        for (int off = 0x18; off <= 0x60; off += 4)
+        {
+            int   asInt   = *(int*)  (p + off);
+            float asFloat = *(float*)(p + off);
+            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
+        }
+        CDLog.LogInfo(sb.ToString());
     }
 }
 

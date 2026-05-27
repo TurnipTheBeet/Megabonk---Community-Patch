@@ -55,6 +55,10 @@
       <HintPath>$(InteropDir)\UnityEngine.ImageConversionModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(InteropDir)\UnityEngine.ParticleSystemModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="com.rlabrecque.steamworks.net">
       <HintPath>$(InteropDir)\com.rlabrecque.steamworks.net.dll</HintPath>
       <Private>false</Private>
