@@ -18,8 +18,8 @@ public class Plugin : BasePlugin
 
     internal static readonly HashSet<EItem> ActiveUncappedItems   = new() { EItem.Anvil, EItem.OverpoweredLamp, EItem.ZaWarudo };
     internal static readonly HashSet<EItem> ForcedPoolItems       = new() { EItem.Battery, EItem.Skuleg, EItem.OldMask, EItem.BrassKnuckles, EItem.DemonicBlood, EItem.IdleJuice, EItem.SuckyMagnet, EItem.Key, EItem.EchoShard };
-    internal static readonly HashSet<int>   BlacklistedStats       = new() { 1,2,3,4,5,10,11,24 };
-    internal static readonly HashSet<int>   BlacklistedShrineStats = new() { 1,2,3,4,5,10,11,24 };
+    internal static readonly HashSet<int>   BlacklistedStats       = new() { 1,2,3,4,5,11,24 };
+    internal static readonly HashSet<int>   BlacklistedShrineStats = new() { 1,2,3,4,5,11,24 };
     internal static readonly List<int>      FullStatPool           = new();
     internal static readonly List<int>      FullShrineStatPool     = new();
 
@@ -37,6 +37,7 @@ public class Plugin : BasePlugin
         LeaderboardServer = cfgServer.Value;
 
         ClassInjector.RegisterTypeInIl2Cpp<ModGui>();
+        ClassInjector.RegisterTypeInIl2Cpp<ScrollWheelDetector>();
         var harmony = new Harmony("com.megabonk.mod");
         harmony.PatchAll(typeof(Plugin).Assembly);
         AddComponent<ModGui>();

@@ -2,7 +2,15 @@
 
 ## 1.3.15
 - Fix Key and Echo Shard missing from loot pool (save deactivation state was not overridden)
-- Diagnostic logging added for Backpack, Brass Knuckles, Cursed Doll offset verification
+- Fix Backpack locale bug: set projPerAmount directly (was doubling amount — broke non-English locales)
+- Fix Brass Knuckles size cap: move write to postfix so method can't overwrite it
+- Golden Ring: restore 1/400 → 1/128 drop chance via safe Harmony patch (no VirtualProtect)
+- DurationMultiplier removed from stat blacklists (Chaos, Gamble, Shrines)
+- Leaderboard: Personal tab added — shows your best run per character, scrollable
+- Leaderboard: mouse wheel scrolling on Global, Friends, and Personal tabs
+- Leaderboard: rank numbers scroll correctly with entries
+- Leaderboard: your entry no longer pins/locks when scrolling past it in Global
+- Leaderboard: personal data pre-fetched on main menu load so it's ready instantly
 
 ## 1.3.14
 - Remove VirtualProtect usage (Thunderstore TOS compliance)

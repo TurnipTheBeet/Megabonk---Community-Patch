@@ -1037,6 +1037,48 @@ static class Patch_EchoShard_Overflow
 }
 
 // ─────────────────────────────────────────────────────────────────
+// GOLDEN RING — boost secret drop rate: 1/400 → 1/128
+// Postfix GetRandomChestItem: if the game didn't already give golden ring,
+// run our own check with the higher chance (same luck + legendary conditions).
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ItemUtility), nameof(ItemUtility.GetRandomChestItem))]
+static class Patch_GoldenRing_DropRate
+{
+    const float TargetChance = 1f / 128f; // desired chance per legendary chest roll
+    const float BaseChance   = 1f / 400f; // original game chance (already applied)
+    // Extra chance on top of the base so combined ≈ 1/128
+    const float ExtraChance  = TargetChance - BaseChance;
+
+    [HarmonyPostfix]
+    static void Postfix(EChest chestType, float luck, ref ItemData __result)
+    {
+        try
+        {
+            // Already gave golden ring — nothing to do
+            if (__result != null && __result.eItem == EItem.GoldenRing) return;
+
+            // Must be a legendary chest roll (same condition the game uses)
+            var items = RunUnlockables.availableItems;
+            if (items == null || !items.ContainsKey(EItemRarity.Legendary)) return;
+            var legList = items[EItemRarity.Legendary];
+            if (legList == null || legList.Count == 0) return;
+
+            // Luck gate — same threshold the game checks internally
+            if (luck <= 6f) return;
+
+            // Roll the extra chance
+            if (UnityEngine.Random.value < ExtraChance)
+            {
+                var ring = DataManager.Instance?.GetItem(EItem.GoldenRing);
+                if (ring != null) __result = ring;
+            }
+        }
+        catch { }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // LEADERBOARD — block Steam submission, relay to local server
 // ─────────────────────────────────────────────────────────────────
 
@@ -1159,10 +1201,16 @@ static class Patch_Leaderboard_Download
 [HarmonyPatch(typeof(SteamLeaderboardNew), "OnDownloadResultsGlobal")]
 static class Patch_OnDownloadResultsGlobal
 {
+    // PREFIX: block original entirely when Personal tab owns the slots.
+    // Without this, game fires A_LeaderboardReady internally BEFORE our postfix
+    // can check IsActive, overwriting Personal tab display.
+    [HarmonyPrefix]
+    static bool Prefix() => !PersonalTab.IsActive;
+
     [HarmonyPostfix]
     static void Postfix(SteamLeaderboardNew __instance)
     {
-        if (!LeaderboardRelay.Enabled) return;
+        if (!LeaderboardRelay.Enabled || PersonalTab.IsActive) return;
         LeaderboardInjector.ReplaceEntriesIfReady(__instance);
     }
 }
@@ -1170,10 +1218,14 @@ static class Patch_OnDownloadResultsGlobal
 [HarmonyPatch(typeof(SteamLeaderboardNew), "OnDownloadResultsFriends")]
 static class Patch_OnDownloadResultsFriends
 {
+    // PREFIX: block original when Personal tab active — same timing issue.
+    [HarmonyPrefix]
+    static bool Prefix() => !PersonalTab.IsActive;
+
     [HarmonyPostfix]
     static void Postfix(SteamLeaderboardNew __instance)
     {
-        if (!LeaderboardRelay.Enabled) return;
+        if (!LeaderboardRelay.Enabled || PersonalTab.IsActive) return;
         var all    = SteamLeaderboardsManagerNew.leaderboardKillsAllTime;
         var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
         if (__instance != all && __instance != weekly) return;
@@ -1183,6 +1235,23 @@ static class Patch_OnDownloadResultsFriends
         __instance.friendsEntries = cache != null && cache.Length > 0
             ? LeaderboardInjector.BuildFriendsList(cache)
             : new Il2CppSystem.Collections.Generic.List<LeaderboardEntry>();
+        // Re-invoke so game re-renders friends tab with correct rank formatting.
+        try { SteamLeaderboardNew.A_LeaderboardReady?.Invoke(__instance); } catch { }
+    }
+}
+
+// Override Steam name lookup with our server-cached names.
+// SteamFriends.GetFriendPersonaName returns "[unknown]" until Steam fetches
+// the user's info async. We already have the correct name from the server.
+[HarmonyPatch(typeof(SteamFriends), nameof(SteamFriends.GetFriendPersonaName))]
+static class Patch_GetFriendPersonaName
+{
+    [HarmonyPostfix]
+    static void Postfix(CSteamID steamIDFriend, ref string __result)
+    {
+        if (string.IsNullOrEmpty(__result) || __result == "[unknown]")
+            if (LeaderboardInjector.NameCache.TryGetValue(steamIDFriend.m_SteamID, out var cached))
+                __result = cached;
     }
 }
 
@@ -1224,6 +1293,17 @@ static class LeaderboardRelay
                 Log.LogWarning($"Leaderboard server unreachable: {ex.Message}");
             }
         });
+    }
+
+    internal static async System.Threading.Tasks.Task<string> FetchPersonal(string steamId)
+    {
+        if (!Enabled) return "";
+        try
+        {
+            using var client = new System.Net.Http.HttpClient { Timeout = System.TimeSpan.FromSeconds(8) };
+            return await client.GetStringAsync($"{Base}/personal?steamId={System.Uri.EscapeDataString(steamId)}");
+        }
+        catch { return ""; }
     }
 
     internal static async System.Threading.Tasks.Task<string> FetchEntries(string board, int count = 20)
@@ -1292,9 +1372,20 @@ static class LeaderboardInjector
     static volatile ServerEntry[]       _cache    = null;
     static volatile bool                _fetching = false;
     static volatile SteamLeaderboardNew _pending  = null;
+    static SteamLeaderboardNew          _lastLb   = null;
+    static int                          _offset   = 0;
 
     internal static ServerEntry[] CachedEntries => _cache;
     internal static bool IsFetching => _fetching;
+    internal static SteamLeaderboardNew LastLb => _lastLb;
+    internal static int CurrentOffset => _offset;
+
+    // Leaderboard currently shown by the active LeaderboardUiNew — set from Refresh postfix.
+    // More reliable than _lastLb which gets overwritten by both weekly + all-time boards.
+    internal static SteamLeaderboardNew ActiveLb { get; set; } = null;
+
+    // steamId → display name from our server; used to override Steam's "[unknown]"
+    internal static readonly System.Collections.Generic.Dictionary<ulong, string> NameCache = new();
 
     internal static void BeginFetch(SteamLeaderboardNew lb)
     {
@@ -1304,7 +1395,7 @@ static class LeaderboardInjector
         {
             try
             {
-                var json    = await LeaderboardRelay.FetchEntries("kills", 50);
+                var json    = await LeaderboardRelay.FetchEntries("kills", 500);
                 var entries = Parse(json);
                 ModGui.MainThread.Enqueue(() =>
                 {
@@ -1326,6 +1417,7 @@ static class LeaderboardInjector
 
     internal static void ReplaceEntriesIfReady(SteamLeaderboardNew lb)
     {
+        if (PersonalTab.IsActive) return; // Personal tab owns the slots
         var all    = SteamLeaderboardsManagerNew.leaderboardKillsAllTime;
         var weekly = SteamLeaderboardsManagerNew.leaderboardKillsWeekly;
         if (lb != all && lb != weekly) return;
@@ -1344,18 +1436,45 @@ static class LeaderboardInjector
         }
     }
 
-    private static void Replace(SteamLeaderboardNew lb, ServerEntry[] entries)
+    // Scroll: jump to a new offset and re-display the global leaderboard.
+    internal static void ScrollBy(int delta)
     {
-        // Request Steam to fetch persona names for all injected entries
-        foreach (var e in entries)
-            if (ulong.TryParse(e.SteamId, out var sid) && sid != 0)
-                SteamFriends.RequestUserInformation(new CSteamID(sid), true);
+        var lb = ActiveLb ?? _lastLb;
+        if (PersonalTab.IsActive || lb == null || _cache == null || _cache.Length == 0) return;
+        const int slots = 9;
+        _offset = System.Math.Max(0, System.Math.Min(_offset + delta, System.Math.Max(0, _cache.Length - slots)));
+        Replace(lb, _cache);
+    }
 
-        lb.globalEntries  = BuildList(entries);
-        lb.friendsEntries = BuildFriendsList(entries);
-        Log.LogInfo($"Replaced global({entries.Length}) + friends({lb.friendsEntries.Count}) on '{lb.lbName}', invoking A_LeaderboardReady");
-        // We are already on the main thread (called from Harmony postfix on Unity callback).
-        // Call directly — no need to enqueue; enqueue adds a frame delay and silently swallows Il2CppExceptions.
+    internal static void ResetScroll() => _offset = 0;
+
+    private static void Replace(SteamLeaderboardNew lb, ServerEntry[] allEntries)
+    {
+        _lastLb = lb;
+
+        // Clamp offset and build the visible window
+        const int slots = 9;
+        _offset = System.Math.Max(0, System.Math.Min(_offset, System.Math.Max(0, allEntries.Length - slots)));
+        int count  = System.Math.Min(slots, allEntries.Length - _offset);
+        var window = new ServerEntry[count];
+        System.Array.Copy(allEntries, _offset, window, 0, count);
+
+        // Cache server names and request Steam info (for avatars)
+        foreach (var e in allEntries)
+            if (ulong.TryParse(e.SteamId, out var sid) && sid != 0)
+            {
+                if (!string.IsNullOrEmpty(e.Name)) NameCache[sid] = e.Name;
+                SteamFriends.RequestUserInformation(new CSteamID(sid), true);
+            }
+
+        lb.globalEntries  = BuildList(window, _offset);
+        lb.friendsEntries = BuildFriendsList(allEntries);
+
+        // Block localEntry injection: game checks *(longlong*)(leaderboard+0x40) != 0
+        // (m_steamIDUser of localEntry) before pinning user's rank at the last slot.
+        // Zeroing it makes the condition fail → injection skipped entirely.
+        try { unsafe { *(long*)(lb.Pointer + 0x40) = 0L; } } catch { }
+        Log.LogInfo($"Replaced global(window {_offset}+{count}/{allEntries.Length}) on '{lb.lbName}', invoking A_LeaderboardReady");
         try
         {
             var ev = SteamLeaderboardNew.A_LeaderboardReady;
@@ -1369,7 +1488,7 @@ static class LeaderboardInjector
         }
     }
 
-    internal static Il2CppSystem.Collections.Generic.List<LeaderboardEntry> BuildList(ServerEntry[] entries)
+    internal static Il2CppSystem.Collections.Generic.List<LeaderboardEntry> BuildList(ServerEntry[] entries, int rankOffset = 0)
     {
         var list = new Il2CppSystem.Collections.Generic.List<LeaderboardEntry>();
         if (entries == null) return list;
@@ -1384,7 +1503,7 @@ static class LeaderboardInjector
             var t = new LeaderboardEntry_t
             {
                 m_steamIDUser = new CSteamID(sid),
-                m_nGlobalRank = i + 1,
+                m_nGlobalRank = rankOffset + i + 1,
                 m_nScore      = se.Score,
                 m_cDetails    = details.Length,
             };
@@ -1431,6 +1550,365 @@ static class LeaderboardInjector
         [System.Text.Json.Serialization.JsonPropertyName("steamId")]        public string SteamId        { get; set; } = "";
         [System.Text.Json.Serialization.JsonPropertyName("name")]           public string Name           { get; set; } = "";
         [System.Text.Json.Serialization.JsonPropertyName("characterIndex")] public int    CharacterIndex { get; set; }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SCROLL WHEEL — lets players scroll through the global leaderboard
+// ─────────────────────────────────────────────────────────────────
+
+class ScrollWheelDetector : MonoBehaviour
+{
+    public ScrollWheelDetector(System.IntPtr ptr) : base(ptr) { }
+    void Update()
+    {
+        float dy = UnityEngine.Input.mouseScrollDelta.y;
+        if (dy == 0f) return;
+        int delta = dy > 0f ? -1 : 1;
+        if (PersonalTab.IsActive)
+            PersonalTab.ScrollBy(delta);
+        else
+            LeaderboardInjector.ScrollBy(delta);
+    }
+}
+
+[HarmonyPatch(typeof(LeaderboardUiNew), "Refresh")]
+static class Patch_LeaderboardUiNew_Refresh
+{
+    [HarmonyPostfix]
+    static void Postfix(LeaderboardUiNew __instance)
+    {
+        // Attach scroll detector once per panel instance
+        try
+        {
+            if (__instance.GetComponent<ScrollWheelDetector>() == null)
+                __instance.gameObject.AddComponent<ScrollWheelDetector>();
+        }
+        catch { }
+
+        // Track which leaderboard the active UI is showing — used by ScrollBy.
+        // _lastLb gets overwritten by weekly+all-time boards; this is always current.
+        try
+        {
+            unsafe
+            {
+                var lbPtr = *(System.IntPtr*)(__instance.Pointer + 0x48);
+                if (lbPtr != System.IntPtr.Zero)
+                    LeaderboardInjector.ActiveLb = new SteamLeaderboardNew(lbPtr);
+            }
+        }
+        catch { }
+
+        PersonalTab.Init(__instance);
+
+        // Ensure fetch is in-flight as soon as the panel opens.
+        // BeginFetch is guarded by _fetching, so this is safe to call every Refresh.
+        PersonalTab.BeginFetch();
+
+        // If Personal tab is active, Refresh just wiped our slots — restore immediately.
+        // Safe to call direct since Refresh has already finished populating leaderboardEntries.
+        if (PersonalTab.IsActive)
+        {
+            PersonalTab.Redisplay();
+        }
+        else if (Patch_LBTypeSelected.CurrentTab == 0)
+        {
+            var slots = __instance.leaderboardEntries;
+            var cache = LeaderboardInjector.CachedEntries;
+            if (slots != null && slots.Count >= 10 && cache != null)
+            {
+                int offset = LeaderboardInjector.CurrentOffset;
+                var dm     = DataManager.Instance;
+
+                // Force-write slots 0-8 with server data.
+                // Game pins localEntry at slot 0 (top) when user's rank exits the window,
+                // shifting all other entries down — we override this entirely.
+                var mySteamId = Steamworks.SteamUser.GetSteamID().m_SteamID.ToString();
+                for (int i = 0; i < 9 && i < slots.Count; i++)
+                {
+                    var row = slots[i];
+                    if (row == null) continue;
+                    int idx = offset + i;
+                    if (idx >= cache.Length) { try { row.Clear(); } catch { } continue; }
+                    var e = cache[idx];
+                    try
+                    {
+                        row.gameObject.SetActive(true);
+                        ((TMPro.TMP_Text)row.rank).SetText($"#{idx + 1}");
+                        ((TMPro.TMP_Text)row.playerName).SetText(e.Name ?? "?");
+                        ((TMPro.TMP_Text)row.score).SetText(e.Score.ToString("N0"));
+                        if (dm?.unsortedCharacterData != null)
+                            for (int j = 0; j < dm.unsortedCharacterData.Count; j++)
+                            {
+                                var cd = dm.unsortedCharacterData[j];
+                                if (cd == null || (int)cd.eCharacter != e.CharacterIndex) continue;
+                                if (cd.icon != null) { row.characterIcon.texture = cd.icon; }
+                                break;
+                            }
+                        // Clear localHighlight + playerIcon unless this is the user's entry.
+                        // Game activates highlight + sets Steam avatar but never clears them
+                        // when the entry scrolls off — both persist on the wrong row.
+                        bool isMe = e.SteamId == mySteamId;
+                        if (row.localHighlight != null)
+                            row.localHighlight.gameObject.SetActive(isMe);
+                        if (!isMe && row.playerIcon != null
+                            && ulong.TryParse(e.SteamId, out var sid))
+                        {
+                            var avatar = Assets.Scripts.Steam.SteamUtility.LoadAvatar(sid, 0);
+                            if (avatar != null) row.playerIcon.texture = avatar;
+                        }
+                    }
+                    catch { }
+                }
+
+                // Slot 9 is the game's localEntry slot — localEntry is zeroed in Replace
+                // so the game won't inject anything there. Leave it as-is.
+                try { slots[9]?.Clear(); } catch { }
+            }
+        }
+    }
+}
+
+[HarmonyPatch(typeof(LeaderboardUiNew), "OnLeaderboardTypeSelected")]
+static class Patch_LBTypeSelected
+{
+    internal static int CurrentTab { get; private set; } = 0;
+
+    [HarmonyPrefix]
+    static void Prefix(int index)
+    {
+        // Set CurrentTab BEFORE original runs so any internal Refresh() sees correct tab.
+        if (index < 2) CurrentTab = index;
+    }
+
+    [HarmonyPostfix]
+    static void Postfix(int index)
+    {
+        // index 0 = Global, 1 = Friends — real tabs, deactivate personal
+        // index 2+ = Personal (we injected it), leave IsActive alone
+        if (index >= 2) return;
+        PersonalTab.IsActive = false;
+        if (index == 0)
+        {
+            LeaderboardInjector.ResetScroll();
+            var lb = LeaderboardInjector.LastLb;
+            if (lb != null)
+                try { SteamLeaderboardNew.A_LeaderboardReady?.Invoke(lb); } catch { }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// PERSONAL LEADERBOARD TAB
+// Repurposes the hidden B_Effects button in leaderboardTypeButtons.
+// On click: fetches /personal?steamId=X, writes directly to slots.
+// ─────────────────────────────────────────────────────────────────
+
+static class PersonalTab
+{
+    static readonly BepInEx.Logging.ManualLogSource Log =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.PersonalTab");
+
+    internal static bool IsActive { get; set; } = false;
+    static LeaderboardUiNew                   _ui;
+    static MyButtonTabs                       _tabButton;
+    static GameObject                         _tabGo       = null;
+    static LeaderboardInjector.ServerEntry[]  _lastEntries = null;
+    static bool                               _fetching    = false;
+    static int                                _offset      = 0;
+
+    internal static void Init(LeaderboardUiNew ui)
+    {
+        _ui = ui; // always update — reference does leaderboardDisplay = __instance every Refresh
+
+        try
+        {
+            // Find and wire the button once; cache _tabGo so we skip FindObjectsOfType after
+            if (_tabGo == null)
+            {
+                var allGos = UnityEngine.Object.FindObjectsOfType<GameObject>(true);
+                foreach (var go in allGos)
+                {
+                    if (go.name != "B_Effects") continue;
+                    if (!go.transform.IsChildOf(ui.leaderboardTypeButtons.transform)) continue;
+
+                    var btn = go.GetComponent<MyButtonTabs>();
+                    if (btn == null) continue;
+
+                    var uiBtn = go.GetComponent<UnityEngine.UI.Button>();
+                    if (uiBtn != null)
+                    {
+                        uiBtn.onClick.RemoveAllListeners();
+                        uiBtn.onClick.AddListener(new System.Action(OnClick));
+                    }
+
+                    go.SetActive(true);
+                    _tabButton = btn;
+                    _tabGo     = go;
+                    Log.LogInfo("Personal tab wired.");
+                    break;
+                }
+            }
+
+            // Always re-set label — game resets it to "Effects" between Refreshes
+            if (_tabGo != null)
+            {
+                var tmp = _tabGo.GetComponentInChildren<TMPro.TextMeshProUGUI>();
+                if (tmp != null)
+                {
+                    tmp.text   = "Personal";
+                    tmp.m_text = "Personal"; // IL2CPP TMPro needs both
+                }
+            }
+        }
+        catch (System.Exception ex) { Log.LogWarning($"Init: {ex.Message}"); }
+    }
+
+    // Fetch personal entries in the background. Called on panel open and can be
+    // called again to refresh (e.g. after submitting a new score).
+    internal static void BeginFetch()
+    {
+        if (_fetching) return;
+        _fetching    = true;
+        _lastEntries = null;
+        _offset      = 0;
+        var steamId  = Steamworks.SteamUser.GetSteamID().m_SteamID.ToString();
+        System.Threading.Tasks.Task.Run(async () =>
+        {
+            var json    = await LeaderboardRelay.FetchPersonal(steamId);
+            var entries = ParsePersonal(json);
+            ModGui.MainThread.Enqueue(() =>
+            {
+                _lastEntries = entries;
+                _fetching    = false;
+                Log.LogInfo($"Personal pre-fetch: {entries.Length} entries");
+                if (IsActive) Display(entries); // update live if tab already showing
+            });
+        });
+    }
+
+    static void OnClick()
+    {
+        IsActive = true;
+        if (_ui == null) return;
+
+        // Write slots FIRST, then ButtonPressed — matches reference implementation order.
+        // ButtonPressed may trigger Refresh which would wipe slots; writing first ensures
+        // data is visible, and Redisplay() in the Refresh postfix re-applies if needed.
+        if (_lastEntries != null)
+            Display(_lastEntries);
+        else
+        {
+            BeginFetch(); // re-trigger if pre-fetch failed or not yet complete
+            try { ((TMPro.TMP_Text)_ui.leaderboardEntries[0].playerName).SetText("Loading…"); } catch { }
+        }
+
+        ActivateTabButton();
+    }
+
+    static void ActivateTabButton()
+    {
+        try
+        {
+            if (_ui?.leaderboardTypeButtons == null || _tabButton == null) return;
+            var tb = _ui.leaderboardTypeButtons;
+            // Expand buttons array to 3 so ButtonPressed(2, false) has a valid index.
+            if (tb.buttons == null || tb.buttons.Length < 3)
+            {
+                var arr = new Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppReferenceArray<MyButtonTabs>(3);
+                if (tb.buttons != null)
+                    for (int k = 0; k < System.Math.Min((int)tb.buttons.Length, 2); k++)
+                        arr[k] = tb.buttons[k];
+                arr[2] = _tabButton;
+                tb.buttons = arr;
+            }
+            tb.ButtonPressed(2, false);
+        }
+        catch (System.Exception ex) { Log.LogWarning($"ActivateTabButton: {ex.Message}"); }
+    }
+
+    // Called from Refresh postfix — restores personal display after game wipes slots.
+    internal static void Redisplay()
+    {
+        if (_lastEntries != null)
+            Display(_lastEntries);
+    }
+
+    internal static void ScrollBy(int delta)
+    {
+        if (_lastEntries == null || _lastEntries.Length == 0) return;
+        if (_ui?.leaderboardEntries == null) return;
+        int slots = _ui.leaderboardEntries.Count;
+        _offset = System.Math.Max(0, System.Math.Min(_offset + delta, System.Math.Max(0, _lastEntries.Length - slots)));
+        Display(_lastEntries);
+    }
+
+    static void Display(LeaderboardInjector.ServerEntry[] entries)
+    {
+        if (!IsActive || _ui?.leaderboardEntries == null) return;
+
+        // Cache server names for GetFriendPersonaName patch
+        foreach (var e in entries)
+            if (ulong.TryParse(e.SteamId, out var sid) && sid != 0 && !string.IsNullOrEmpty(e.Name))
+                LeaderboardInjector.NameCache[sid] = e.Name;
+
+        var dm    = DataManager.Instance;
+        int slots = _ui.leaderboardEntries.Count;
+        // Clamp offset
+        _offset = System.Math.Max(0, System.Math.Min(_offset, System.Math.Max(0, entries.Length - slots)));
+        Log.LogInfo($"Personal Display: {entries.Length} entries, {slots} slots, offset={_offset}");
+        for (int i = 0; i < slots; i++)
+        {
+            var row = _ui.leaderboardEntries[i];
+            if (row == null) { Log.LogWarning($"Slot {i}: null row"); continue; }
+            int entryIdx = i + _offset;
+            if (entryIdx >= entries.Length) { try { row.Clear(); } catch { } continue; }
+            try
+            {
+                var e = entries[entryIdx];
+                bool wasActive = row.gameObject.activeSelf;
+                if (!wasActive) row.gameObject.SetActive(true);
+                Log.LogInfo($"Slot {i}: writing {e.Name} score={e.Score} char={e.CharacterIndex} (wasActive={wasActive})");
+                ((TMPro.TMP_Text)row.rank).SetText($"#{entryIdx + 1}");
+                ((TMPro.TMP_Text)row.playerName).SetText(e.Name ?? "?");
+                ((TMPro.TMP_Text)row.score).SetText(e.Score.ToString("N0"));
+                if (dm?.unsortedCharacterData != null)
+                    for (int j = 0; j < dm.unsortedCharacterData.Count; j++)
+                    {
+                        var cd = dm.unsortedCharacterData[j];
+                        if (cd == null || (int)cd.eCharacter != e.CharacterIndex) continue;
+                        if (cd.icon != null)
+                        {
+                            row.characterIcon.texture = cd.icon;
+                            row.playerIcon.texture    = cd.icon;
+                        }
+                        break;
+                    }
+                Log.LogInfo($"Slot {i}: OK");
+            }
+            catch (System.Exception ex) { Log.LogWarning($"Slot {i}: EXCEPTION {ex.Message}"); }
+        }
+        Log.LogInfo($"Personal tab: {entries.Length} entries displayed.");
+        // Force canvas rebuild so text changes render immediately
+        try
+        {
+            if (_ui != null)
+                UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(
+                    _ui.GetComponent<UnityEngine.RectTransform>());
+        }
+        catch { }
+    }
+
+    static LeaderboardInjector.ServerEntry[] ParsePersonal(string json)
+    {
+        if (string.IsNullOrEmpty(json) || json == "[]")
+            return System.Array.Empty<LeaderboardInjector.ServerEntry>();
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<LeaderboardInjector.ServerEntry[]>(json)
+                   ?? System.Array.Empty<LeaderboardInjector.ServerEntry>();
+        }
+        catch { return System.Array.Empty<LeaderboardInjector.ServerEntry>(); }
     }
 }
 
@@ -1651,6 +2129,9 @@ static class Patch_MainMenu_Start_Version
     {
         ModGui.MainThread.Enqueue(() => ModGui.NeedVersionPatch = true);
         CheckVersionAsync();
+        // Pre-fetch personal leaderboard data early so it's ready before the user
+        // opens the leaderboard and clicks the Personal tab
+        PersonalTab.BeginFetch();
     }
 
     static void CheckVersionAsync()
@@ -1750,8 +2231,10 @@ static class Patch_CombatScaling_DamageMultiplier
 
 // ─────────────────────────────────────────────────────────────────
 // CACTUS — numProjectilesPerAmount = 4; ray distance scales with size
+// TODO: patch not working, archived for now
 // ─────────────────────────────────────────────────────────────────
 
+/*
 // Force numProjectilesPerAmount before the game computes numProjectiles
 [HarmonyPatch(typeof(ItemCactus), "OnInitOrAmountChanged")]
 static class Patch_Cactus_OnInitOrAmountChanged
@@ -1780,10 +2263,13 @@ static class Patch_Cactus_OnInitOrAmountChanged
         CactusLog.LogInfo(sb.ToString());
     }
 }
+*/
 
 // Scale visual thorn range with player SizeMultiplier.
 // ParticleOpacity.Awake fires when CactusProjectile is instantiated,
 // before the particle system emits its burst — ideal time to scale startSpeed and velocity cap.
+// TODO: patch not working, commented out for now
+/*
 [HarmonyPatch(typeof(ParticleOpacity), "Awake")]
 static class Patch_CactusProjectile_ScaleParticles
 {
@@ -1838,6 +2324,7 @@ static class Patch_CactusProjectile_ScaleParticles
         }
     }
 }
+*/
 
 
 

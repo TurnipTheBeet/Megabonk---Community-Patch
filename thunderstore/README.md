@@ -11,6 +11,8 @@ A community-driven balance and quality-of-life mod for Megabonk.
 - Replaces the Steam leaderboard with a shared community leaderboard
 - Scores submitted automatically at the end of each run
 - Friends tab shows server data filtered by your Steam friends
+- **Personal tab** — shows your best run per character (scroll with mouse wheel)
+- Global/Friends tabs support mouse wheel scrolling with correct rank numbers
 - Server rejects submissions from outdated mod versions
 - Shows an in-game warning banner if your mod is out of date
 
@@ -76,7 +78,6 @@ Excludes broken/junk stats from Chaos rolls, Gamble Tome, Dicehead passive, and 
 | Thorns | Trivial defensive stat |
 | Armor | Trivial defensive stat |
 | Evasion | Trivial defensive stat |
-| DurationMultiplier | Low impact |
 | ProjectileSpeedMultiplier | Low impact |
 | KnockbackMultiplier | Low impact |
 
