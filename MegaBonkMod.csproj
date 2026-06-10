@@ -13,9 +13,11 @@
     <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.755" />
   </ItemGroup>
 
-  <!-- BepInEx interop assemblies from the r2modman Default profile. -->
+  <!-- BepInEx interop assemblies from the r2modman Default profile.
+       Resolved from %APPDATA% so it works per-machine. Override InteropDir on the
+       command line (-p:InteropDir=...) if your profile lives elsewhere. -->
   <PropertyGroup>
-    <InteropDir>C:\Users\kenne\AppData\Roaming\r2modmanPlus-local\Megabonk\profiles\Default\BepInEx\interop</InteropDir>
+    <InteropDir Condition="'$(InteropDir)' == ''">$(AppData)\r2modmanPlus-local\Megabonk\profiles\Default\BepInEx\interop</InteropDir>
   </PropertyGroup>
 
   <ItemGroup>
