@@ -20,7 +20,7 @@ A community-driven balance and quality-of-life mod for Megabonk.
 
 ## Gameplay
 
-- **Fast Fall** — hold Slide while airborne to fast fall
+- **Fast Fall** — hold the bind (default Left Ctrl, rebindable) while airborne to fall faster
 - **Full Heal** — heart powerup fully heals instead of partial
 - **Pots** — drop a random powerup instead of always health
 - **Golden Ring** — grants +1 banish per ring held
@@ -39,10 +39,14 @@ A community-driven balance and quality-of-life mod for Megabonk.
 - **Green Credit Card** — chest price increase reduced from 10% to 2% per card
 - **Echo Shard** — overflow chance rolls extra shards
 - **Tony McZooms** — Zap passive grants +0.25 projectiles per level
+- **Roberto** — Hoarder passive also grants +0.5% elite damage per level
+- **Power Gloves** — on-hit damage buffed ~9× (~22 → ~200 per hit)
+- **Key** — chest open chance 15% per stack (tooltip updated)
 - **Golden Shield** — removes reduced gold penalty on Kevin self-damage
 - **Bluetooth Dagger** — correctly triggers Lightning Orb stun (element fix)
 - **All Weapons** — +10% crit chance and +20% crit damage added to upgrade pool
 - **Bow / Revolver** — +2 projectiles per level upgrade instead of +1
+- **Scythe** — attack rate roughly doubled (endCooldown 0.85s → 0.425s, burstTime 1.5s → 0.75s)
 
 ---
 
@@ -51,9 +55,11 @@ A community-driven balance and quality-of-life mod for Megabonk.
 | Item | Change |
 |------|--------|
 | Bob's Lantern | Rare → Legendary |
-| Energy Core | Rare → Epic |
+| Golden Shield | Rare → Epic |
+| Slurp Gloves | Epic → Rare |
+| Energy Core | Legendary → Rare |
 | Electric Plug | Rare → Epic |
-| Spiky Shield | Epic → Rare, now toggleable |
+| Spiky Shield | Epic → Legendary, now toggleable, armor per stack 10 → 50 |
 | Sucky Magnet | Legendary → Epic, non-toggleable (always in pool) |
 | Scarf | Legendary → Rare, non-toggleable |
 | Backpack | → Common |
@@ -67,19 +73,23 @@ A community-driven balance and quality-of-life mod for Megabonk.
 
 ---
 
-## Stat Blacklists
+## Stat Toggles (Chaos / Gamble pool)
 
-Excludes broken/junk stats from Chaos rolls, Gamble Tome, Dicehead passive, and Charge Shrines. Hardcoded — not user-configurable.
+Curate which stats can roll from Chaos rolls, Gamble Tome, Dicehead passive, and Charge Shrines. Open the toggle menu with **F3**. Choices persist via config and apply live mid-run.
 
-| Stat | Reason |
-|------|--------|
-| HealthRegen | Trivial defensive stat |
-| Shield | Trivial defensive stat |
-| Thorns | Trivial defensive stat |
-| Armor | Trivial defensive stat |
-| Evasion | Trivial defensive stat |
-| ProjectileSpeedMultiplier | Low impact |
-| KnockbackMultiplier | Low impact |
+| Stat | Default | Reason |
+|------|---------|--------|
+| HealthRegen | Off | Trivial defensive stat |
+| Shield | Off | Trivial defensive stat |
+| Thorns | Off | Trivial defensive stat |
+| Armor | Off | Trivial defensive stat |
+| Evasion | Off | Trivial defensive stat |
+| ProjectileSpeedMultiplier | Off | Low impact |
+| KnockbackMultiplier | Off | Low impact |
+| Duration | On | Useful — toggle off to remove |
+| Movement Speed | On | Useful — toggle off to remove |
+
+Off = excluded from the pool by default (toggle on to re-enable). On = in the pool by default (toggle off to remove).
 
 ---
 
@@ -112,13 +122,47 @@ All characters normalized to minimum 1.2× speed, jump 10, pickup range 10. Char
 
 ---
 
+## Settings Tab
+
+A native **"Community Patch"** tab is added to the game's Settings menu. From there you can:
+
+- **Rebind every mod hotkey** — no config-file editing needed
+- **SFX Volume sliders** — separate Weapon / Hit / Item sliders to tune or mute combat and item sounds independently of the game's master volume
+  - *Note:* some on-hit item effects share the game's generic impact sound, so they're scaled by the **Hit** slider rather than Item
+- **Mod Menu Opacity** — background opacity of the mod's own windows
+
+---
+
+## Tools & Automation
+
+- **Map Scanner** (open with hotkey, start/stop with another) — pick how many map features you want, then it auto-rerolls the run until a map matches, stops, and pauses. Criteria: Moais, Shady Guys, combined Moai+Shady, Boss Curses (exact match), total Microwaves, and Microwaves by tier. Runs fully in-process — no external tool.
+- **Scaling Auto-Upgrade** — auto-picks level-up choices using a bucket priority system: new weapons/tomes & legendaries first, then scaling tomes (XP / Difficulty), then luck / weapons / other tomes, weighted by rarity and endgame stat importance. XP stops being prioritised near its 10× cap; Difficulty (Cursed) stops once it hits the ~600 effective cap.
+  - **Auto-Upgrade Log** — a separate window (newest-first) showing what it picked and what it skipped.
+- **Smart Skip Chest Animation** — auto-enables chest-open skipping when you run out of banishes, turns it back off when you gain a Golden Ring, and resets after each run.
+- **Priority Targeting** — replaces auto-aim target selection with a scorer that prioritises bosses/elites, then the nearest enemy you can kill soonest (avoids leaving low-HP stragglers alive).
+- **Game Speed** — toggles between 1× and 2×. Counts as a cheat, so it blocks leaderboard submission for that run.
+- **Effects Opacity** — toggles the game's Settings > Effects particle opacity between 0% and 100%.
+
+---
+
 ## Controls
+
+All hotkeys are rebindable in the **Community Patch** settings tab. Defaults:
 
 | Key | Action |
 |-----|--------|
-| F1 | Toggle debug menu (password protected) |
+| F1 | Toggle mod menu (password protected) |
 | F2 | Toggle damage chart (death screen) |
-| Slide (airborne) | Fast fall |
+| F3 | Toggle Chaos/Gamble stat-toggle menu |
+| F4 | Open Map Scanner window |
+| F5 | Start / stop the map scan |
+| F6 | Toggle Smart Skip Chest Animation |
+| F7 | Toggle Priority Targeting |
+| F8 | Toggle Scaling Auto-Upgrade |
+| F9 | Toggle Auto-Upgrade log window |
+| F11 | Toggle Effects opacity (0% / 100%) |
+| T | Toggle Game Speed (1× / 2×) |
+| Left Ctrl | Fast fall (hold while airborne) |
 
 ---
 

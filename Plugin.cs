@@ -8,11 +8,11 @@ using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.3.15")]
+[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.4.1")]
 public class Plugin : BasePlugin
 {
-    internal static string LeaderboardServer = "http://megabonkcommunitypatch.duckdns.org:9000";
-    internal const  string ModVersion        = "1.3.15";
+    internal static string LeaderboardServer = "https://megabonk-lb.fly.dev";
+    internal const  string ModVersion        = "1.4.1";
 
     internal const bool PatchGrandmasTonic = true;
 
@@ -24,10 +24,13 @@ public class Plugin : BasePlugin
     internal static readonly List<int>      FullShrineStatPool     = new();
 
     internal static new BepInEx.Logging.ManualLogSource Log { get; private set; }
+    internal static ModGui GuiInstance { get; private set; }
 
     public override void Load()
     {
         Log = base.Log;
+
+        Diag.Install();   // capture full Unity stack traces (diagnosing settings-close NRE)
 
         var cfgServer = Config.Bind("Leaderboard", "ServerUrl", LeaderboardServer,
             "DO NOT CHANGE THIS. Only modify if you are the server host running locally (use http://localhost:9000).");
@@ -36,11 +39,21 @@ public class Plugin : BasePlugin
             cfgServer.Value = LeaderboardServer;
         LeaderboardServer = cfgServer.Value;
 
+        UiTheme.Init(Config);
+        Hotkeys.Init(Config);
+        ChaosMenu.Init(Config);
+        MapScanner.Init(Config);
+        SkipChestSync.Init(Config);
+        SmartTargeting.Init(Config);
+        CursedSwordAim.Init(Config);
+        WeaponSfxVolume.Init(Config);
+        AutoLevelPick.Init(Config);
+
         ClassInjector.RegisterTypeInIl2Cpp<ModGui>();
         ClassInjector.RegisterTypeInIl2Cpp<ScrollWheelDetector>();
         var harmony = new Harmony("com.megabonk.mod");
         harmony.PatchAll(typeof(Plugin).Assembly);
-        AddComponent<ModGui>();
+        GuiInstance = AddComponent<ModGui>();
 
         Log.LogInfo($"[MegaBonkMod] Loaded. Server={LeaderboardServer}");
     }

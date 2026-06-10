@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.4.1
+- Added Map Scanner: pick how many map features you want, then auto-reroll the run until a map matches and it stops + pauses. Criteria: Moais, Shady Guys, a combined Moai+Shady count, Boss Curses (exact match), total Microwaves, and Microwaves by tier (Common/Rare/Epic/Legendary). Two rebindable hotkeys in the Community Patch settings tab — F4 opens the window, F5 starts/stops the scan. Runs fully in-process (reads the game's own interactable counts and uses its own restart, no external tool).
+- Added a native "Community Patch" tab in the game's Settings menu: rebind every mod hotkey, and adjust the new sliders below — no config-file editing needed.
+- Added three SFX volume sliders (Weapon / Hit / Item) in the settings tab, so you can tune or mute combat and item sounds independently of the game's master volume. (Note: some on-hit item effects share the game's generic impact sound and are scaled by the Hit slider.)
+- Added a Mod Menu Opacity slider (settings tab) to set the background opacity of the mod's own windows.
+- Added Priority Targeting: replaces auto-aim target selection with a scorer that prioritises bosses/elites, then the nearest enemy you can kill soonest (avoids leaving low-HP stragglers alive). Toggle hotkey in the settings tab.
+- Added Scaling Auto-Upgrade: auto-picks level-up choices using a bucket system that favours run-defining scaling (new weapons/tomes & legendaries first, then XP/Difficulty, then luck/weapons), weighted by rarity and endgame stat importance. Comes with an Auto-Upgrade Log window (newest-first) showing what it picked and over what. Difficulty (Cursed) stops being prioritised once it hits the 600 effective cap.
+- Added Smart Skip Chest Animation: auto-enables chest-open skipping when you run out of banishes, turns it back off when you gain a Golden Ring, and resets after each run.
+- Added Fast Fall: hold the bind (default Left Ctrl) while airborne to drop faster.
+- Added a Game Speed hotkey (default T) that toggles between 1x and 2x. Counts as a cheat, so it blocks leaderboard submission for that run.
+- Added an Effects Opacity hotkey (default F11) that toggles the game's Settings > Effects particle opacity between 0% and 100%.
+- Power Gloves: on-hit damage buffed roughly 9x (~22 → ~200 per hit) so it's actually useable.
+- Rarity changes: Golden Shield moved Rare → Epic; Slurp Gloves moved Epic → Rare. Their baked rim colors are recolored to match (now correctly limited to the outer outline only).
+- Key: chest open chance per stack changed to 15% (from the previous 20%), tooltip updated to match.
+- Leaderboard moved to a dedicated VPS host (more reliable uptime); personal and global submission unchanged.
+
+## 1.4.0
+- Fixed fire-rate buffs that weren't applying: Black Hole (3×), Mine, Hero Sword, Poison Flask, Sword, and Corrupt Sword (2× each). The previous tweak only lowered the in-burst projectile spacing, which has no effect on these single-shot weapons; now scales the actual cooldown/burst timing so they really fire faster.
+- Reverted the weapon/tome shop slot changes back to vanilla (base 2, buy up to 4). The earlier 1-slot-minimum change wrote an out-of-range shop level into the save, so after switching versions vanilla read it as a 5th tome/weapon slot even with the mod removed. Note: saves already affected need a one-time refund + rebuy of the slots in vanilla to clear it.
+- Fixed item rarity rim color not updating for items we moved to a new rarity (e.g. Sucky Magnet Legendary→Epic, Backpack Rare→Common). The baked rim is now recolored at the source, so it shows correctly on every UI surface — unlocks menu, in-run inventory/pause menu, Shady Guy shop, and the world-drop/HUD icon.
+
+## 1.3.19
+- Reverted the weapon/tome shop slot changes back to vanilla (base 2, buy up to 4). The earlier 1-slot-minimum change wrote an out-of-range shop level into the save, so after switching versions vanilla read it as a 5th tome/weapon slot even with the mod removed. Note: saves already affected need a one-time refund + rebuy of the slots in vanilla to clear it.
+- Fixed item rarity rim color not updating for items we moved to a new rarity (e.g. Sucky Magnet Legendary→Epic, Backpack Rare→Common). The baked rim is now recolored at the source, so it shows correctly on every UI surface — unlocks menu, in-run inventory/pause menu, Shady Guy shop, and the world-drop/HUD icon.
+
+## 1.3.18
+- Turbo Juice: now activates while you are moving instead of standing still (movement detected via player velocity, frame-rate independent)
+- Idle Juice renamed to Turbo Juice
+- Quin's Mask: size cap added (baseRadius 4, radiusPerAmount 2, maxRadius 16 — max 6 stacks; pool slot removed when cap reached)
+- BOMBUS overhaul: now killable (invulnerability removed, debuff immunity kept); first spawn at 15 min overtime then every 5 min, stacking (multiple alive at once); boss-tanky HP (20x the bee's natural overtime-scaled HP); gets faster over time and the smaller it shrinks (up to ~2x); drops a Corrupt chest on death
+- Corrupt chest fix: the game's evil/corrupt chest was missing its mesh and material (rendered magenta) — visuals now filled from the normal chest so it displays correctly; Corrupted-rarity loot pool is empty in the live game, so corrupt chests now give a guaranteed Golden Ring
+- Corrupt chest now spawns on the ground (downward raycast) instead of floating at the bee's center; bee corpse colliders disabled so the ground is detected correctly
+- Fix: winning the run by entering the final-stage portal now records your score to the leaderboard (the game's win-path upload fired too late to reach the server; we now upload the moment you commit to the portal)
+- Chaos/Gamble stat toggles (F3): Duration and Movement Speed are now toggleable in the pool (both on by default — toggle off to remove)
+- Mod menus (F1 cheat menu, F3 Chaos stats): open at double size by default and are now resizeable — drag the title bar to move, drag the ↘ grip in the bottom-right corner to scale
+- Damage chart (F2): now scrollable via mouse wheel; renders above the pause menu so it's readable while paused; fixed it showing only one weapon and blocking the death-screen Continue button when opened mid-run- BOMBUS: minimap icon size fixed (no longer oversized); first arrival now delayed by +5 minutes per stage on later stages
+- Bow: fire rate buffed (cooldown 0.92s → 0.45s, roughly double the shots per second)
+- Sniper: post-burst cooldown halved (~2.0s → ~1.5s per shot; burst/audio unchanged); minBurstInterval lowered to 0.1 for tighter bursts when stacking projectiles; damage unchanged
+- Spiky Shield: moved to the Legendary pool (was Epic) and armor per stack buffed 10 → 50 (fed through the game's hyperbolic armor curve, so damage reduction still caps below 100%)
+- Energy Core: moved to the Rare pool (was Legendary) — weak item, better fit
+- Burst fire rate buffed (lower minBurstInterval = tighter bursts): Black Hole 3×, and 2× for Mine, Hero Sword, Poison Flask, Sword, and Corrupt Sword
+- Scythe: attack rate roughly doubled (endCooldown 0.85s → 0.425s and burstTime 1.5s → 0.75s; burstTime is the dominant term in the cooldown formula)
+- Roberto (Hoarder passive): now also gains +0.5% elite damage per level
+- Item icons: when an item is moved to a new rarity, its baked rarity-colored outline is now recolored to match the new rarity
+
+## 1.3.17
+- Add BOMBUS: giant invulnerable Bee boss (15× scale) that spawns at 28 minutes into overtime with a boss HP bar and one-shot contact damage
+- Za Warudo: track cumulative pickups per run; remove from loot pool after 25 total received
+- Leaderboard: scores now only submitted when a new personal best is set — personal bests cached on main menu load
+- Leaderboard: unauthorized mods detected at startup via BepInEx chainloader reflection; score upload blocked and warning banner shown if any non-patch mods are loaded
+- F1 menu: show warning banner when any cheat feature is used, informing player that leaderboard is disabled for the run; banner hidden on main menu
+
+## 1.3.16
+- Cactus: thorn range now scales with player size (SphereCast maxDistance × SizeMultiplier)
+- Cactus: 4 projectiles per stack (up from default)
+
 ## 1.3.15
 - Fix Key and Echo Shard missing from loot pool (save deactivation state was not overridden)
 - Fix Backpack locale bug: set projPerAmount directly (was doubling amount — broke non-English locales)

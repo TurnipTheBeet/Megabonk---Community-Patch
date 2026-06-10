@@ -22,6 +22,8 @@ using Assets.Scripts.Game.MapGeneration;
 using Assets.Scripts.UI.InGame.Rewards;
 using Assets.Scripts.UI.InGame.Rewards.Effects;
 using Assets.Scripts.UI.HUD;
+using Assets.Scripts.UI.Localization;
+using UnityEngine.Localization;
 using Assets.Scripts.Inventory__Items__Pickups.Stats;
 using Assets.Scripts.Saves___Serialization.Progression.Unlocks;
 using Assets.Scripts.Saves___Serialization.Progression.Achievements;
@@ -38,6 +40,7 @@ using Inventory__Items__Pickups.Xp_and_Levels;
 using Assets.Scripts.Inventory__Items__Pickups.Weapons;
 using Assets.Scripts.Settings___Saves.SaveFiles;
 using Assets.Scripts.Objects.Particles___Effects.ParticleOpacity;
+using Assets.Scripts.Game.Spawning;
 
 namespace MegaBonkMod;
 
@@ -119,7 +122,16 @@ static class Patch_RunUnlockables_Init
 static class Patch_RunUnlockables_OnNewRunStarted
 {
     [HarmonyPostfix]
-    static void Postfix() => Patch_RunUnlockables_Init.RemoveItemCaps();
+    static void Postfix()
+    {
+        Patch_RunUnlockables_Init.RemoveItemCaps();
+        ZaWarudoTracker.Reset();
+        ModGui.CheatsUsed      = false;
+        ModGui.GodMode         = false;
+        ModGui.FlyMode         = false;
+        ModGui.InstaKill       = false;
+        ModGui.FreezeEnemies   = false;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -146,6 +158,113 @@ static class Patch_MicrowaveItemButton_SelectUpgrade
         // Bump cap by 1 — SelectUpgrade only fires for items the player already has,
         // so if maxAmount is reached this lets the cook proceed.
         *(int*)(dataPtr + 0x70) = maxAmount + 1;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MOVEMENT REWORK — IdleJuice (Turbo Juice)
+// Originally activates while standing still. We invert it to activate
+// while moving by lying to the Tick() method about its stored position:
+//   moving  → pos = player.pos  → dist=0 → "still" branch → activates
+//   still   → pos = (999999,…)  → dist huge → "moved" branch → deactivates
+// ─────────────────────────────────────────────────────────────────
+
+// Horizontal speed (units/sec) above which the player counts as "moving".
+// Read from the Rigidbody velocity so it's frame-rate independent.
+static class MovementHelper
+{
+    public const float MoveSpeedThreshold = 1.5f;
+
+    public static bool IsPlayerMoving(PlayerMovement pm)
+    {
+        try
+        {
+            unsafe
+            {
+                var rbPtr = *(System.IntPtr*)(pm.Pointer + 0x48); // rb field
+                if (rbPtr == System.IntPtr.Zero) return false;
+                var v = new Rigidbody(rbPtr).velocity;
+                // Ignore vertical — falling/jumping shouldn't count as ground movement.
+                return (v.x * v.x + v.z * v.z) > (MoveSpeedThreshold * MoveSpeedThreshold);
+            }
+        }
+        catch { return false; }
+    }
+}
+
+[HarmonyPatch(typeof(ItemIdleJuice), "Tick")]
+static class Patch_ItemIdleJuice_Movement
+{
+    [HarmonyPrefix]
+    static void Prefix(ItemIdleJuice __instance)
+    {
+        try
+        {
+            var pm = PlayerMovement.Instance;
+            if (pm == null) return;
+            var pos = pm.transform.position;
+            unsafe
+            {
+                var p = __instance.Pointer;
+                if (MovementHelper.IsPlayerMoving(pm))      // moving → fake "still" so effect activates
+                {
+                    *(float*)(p + 0x3C) = pos.x;
+                    *(float*)(p + 0x40) = pos.y;
+                    *(float*)(p + 0x44) = pos.z;
+                }
+                else                          // still → fake "moved" so effect deactivates
+                {
+                    *(float*)(p + 0x3C) = 999999f;
+                    *(float*)(p + 0x40) = 999999f;
+                    *(float*)(p + 0x44) = 999999f;
+                }
+            }
+        }
+        catch { }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// MOVEMENT REWORK — descriptions: "standing still" → "moving"
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(ItemIdleJuice), "GetDescription")]
+static class Patch_ItemIdleJuice_Desc
+{
+    [HarmonyPostfix]
+    static void Postfix(ref string __result) => __result = MovementDesc.Fix(__result);
+}
+
+static class MovementDesc
+{
+    public static string Fix(string s)
+    {
+        if (s == null) return s;
+        return s
+            .Replace("Standing still", "Moving")
+            .Replace("standing still", "moving")
+            .Replace("Not moving",     "Moving")
+            .Replace("not moving",     "moving")
+            .Replace("Stand still",    "Keep moving")
+            .Replace("stand still",    "keep moving")
+            .Replace("Stay still",     "Keep moving")
+            .Replace("stay still",     "keep moving");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RENAME — "Idle Juice" → "Turbo Juice"
+// Item names come from the localization asset; intercept the central
+// lookup and swap the string wherever it returns.
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(LocalizedString), "GetLocalizedString", new System.Type[] { })]
+static class Patch_IdleJuice_Rename
+{
+    [HarmonyPostfix]
+    static void Postfix(ref string __result)
+    {
+        if (__result == null) return;
+        if (__result.Contains("Idle Juice"))
+            __result = __result.Replace("Idle Juice", "Turbo Juice");
     }
 }
 
@@ -216,6 +335,41 @@ static class Patch_SpicyMeatball_Radius
     }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// SIZE CAP — Quin's Mask (same as Grandma: base=4, perAmount=2, max=16)
+// Field layout identical to Grandma: base 0x34, perAmount 0x38, max 0x3C, radius 0x40
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ItemQuinsMask), "OnInitOrAmountChanged")]
+static class Patch_QuinsMask_SizeCap
+{
+    const float BaseRadius      = 4f;
+    const float RadiusPerAmount = 2f;
+    const float MaxRadius       = 16f;
+    const int   MaxStacks       = 6;   // (16-4)/2
+
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemQuinsMask __instance)
+    {
+        // Set maxRadius before the method runs so it uses our cap
+        *(float*)(__instance.Pointer + 0x3C) = MaxRadius;
+    }
+
+    [HarmonyPostfix]
+    static unsafe void Postfix(ItemQuinsMask __instance)
+    {
+        // Read game's computed radius (includes size stat) before we overwrite it
+        float gameRadius = *(float*)(__instance.Pointer + 0x40);
+        *(float*)(__instance.Pointer + 0x34) = BaseRadius;
+        *(float*)(__instance.Pointer + 0x38) = RadiusPerAmount;
+        *(float*)(__instance.Pointer + 0x3C) = MaxRadius;
+        int amount = *(int*)(__instance.Pointer + 0x18);
+        *(float*)(__instance.Pointer + 0x40) = System.Math.Min(BaseRadius + amount * RadiusPerAmount, MaxRadius);
+        if (gameRadius >= MaxRadius)
+            SizeCapHelper.RemoveFromPool(EItem.QuinsMask);
+    }
+}
+
 static class SizeCapHelper
 {
     internal static void RemoveFromPool(EItem eItem)
@@ -246,7 +400,22 @@ static class Patch_BobLantern_FireRate
 }
 
 // ─────────────────────────────────────────────────────────────────
-// KEY — 20% chest open chance per stack (was 10%)
+// POWER GLOVES — buff on-hit proc damage (~22 → ~200)
+// GetDamage() = amount * baseDamageMultiplier * playerDamage. Scale the
+// returned value so the buff still tracks player damage scaling.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ItemGlovesPower), "GetDamage")]
+static class Patch_GlovesPower_Damage
+{
+    const float DamageScale = 9f;   // ~22 base proc → ~198
+
+    [HarmonyPostfix]
+    static void Postfix(ref float __result) => __result *= DamageScale;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// KEY — 15% chest open chance per stack (was 10%)
 // ─────────────────────────────────────────────────────────────────
 
 [HarmonyPatch(typeof(ItemKey), "OnInitOrAmountChanged")]
@@ -255,7 +424,7 @@ static class Patch_ItemKey_Chance
     [HarmonyPrefix]
     static unsafe void Prefix(ItemKey __instance)
     {
-        *(float*)(__instance.Pointer + 0x30) = 0.2f; // chancePerStack  0.1 → 0.2
+        *(float*)(__instance.Pointer + 0x30) = 0.15f; // chancePerStack  0.1 → 0.15
     }
 }
 
@@ -266,7 +435,7 @@ static class Patch_ItemKey_Desc
     static void Postfix(ref string __result)
     {
         if (__result != null)
-            __result = __result.Replace("10%", "20%");
+            __result = __result.Replace("10%", "15%");
     }
 }
 
@@ -277,28 +446,10 @@ static class Patch_ItemKey_Desc
 [HarmonyPatch(typeof(ItemBrassKnuckles), "OnInitOrAmountChanged")]
 static class Patch_BrassKnuckles_SizeCap
 {
-    static readonly BepInEx.Logging.ManualLogSource BKLog =
-        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.BrassKnucklesDump");
-
     [HarmonyPrefix]
     static unsafe void Prefix(ItemBrassKnuckles __instance)
     {
-        *(float*)(__instance.Pointer + 0x38) = float.MaxValue;
-    }
-
-    [HarmonyPostfix]
-    static unsafe void Postfix(ItemBrassKnuckles __instance)
-    {
-        // DIAGNOSTIC: dump offsets to verify 0x38 is actually maxRadius/sizeCap
-        var sb = new System.Text.StringBuilder();
-        sb.Append("[BrassKnucklesDump] offsets:");
-        for (int off = 0x18; off <= 0x60; off += 4)
-        {
-            int   asInt   = *(int*)  (__instance.Pointer + off);
-            float asFloat = *(float*)(__instance.Pointer + off);
-            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
-        }
-        BKLog.LogInfo(sb.ToString());
+        *(float*)(__instance.Pointer + 0x38) = float.MaxValue;  // 0x38 = maxRadius/sizeCap
     }
 }
 
@@ -309,14 +460,10 @@ static class Patch_BrassKnuckles_SizeCap
 [HarmonyPatch(typeof(ItemBackpack), "OnInitOrAmountChanged")]
 static class Patch_ItemBackpack_Projectiles
 {
-    static readonly BepInEx.Logging.ManualLogSource BackpackLog =
-        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.BackpackDump");
-
     [HarmonyPrefix]
     static unsafe void Prefix(ItemBackpack __instance)
     {
-        // HACK: doubles amount so game computes 2x projectiles. Locale-broken if projPerAmount
-        // is parsed as 0 in non-English locales. Dump below will let us find projPerAmount offset.
+        // doubles amount so game computes 2x projectiles
         *(int*)(__instance.Pointer + 0x18) *= 2;
     }
 
@@ -324,17 +471,6 @@ static class Patch_ItemBackpack_Projectiles
     static unsafe void Postfix(ItemBackpack __instance)
     {
         *(int*)(__instance.Pointer + 0x18) /= 2;
-
-        // DIAGNOSTIC: dump offsets to find projPerAmount
-        var sb = new System.Text.StringBuilder();
-        sb.Append("[BackpackDump] offsets:");
-        for (int off = 0x18; off <= 0x60; off += 4)
-        {
-            int   asInt   = *(int*)  (__instance.Pointer + off);
-            float asFloat = *(float*)(__instance.Pointer + off);
-            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
-        }
-        BackpackLog.LogInfo(sb.ToString());
     }
 }
 
@@ -475,17 +611,35 @@ static class Patch_DataManager_Load
         var borgar = __instance.GetItem(EItem.Borgar);
         if (borgar != null) borgar.canAlwaysToggle = true;
 
-        // Bob's Lantern → Legendary; Energy Core → Epic
+        // Snapshot every item's ORIGINAL rarity before we change any, so the icon
+        // recolor pass (Patch_UnlockContainer_IconRecolor) can remap each baked
+        // rarity-outline from its old color to the new one.
+        IconRecolor.Original.Clear();
+        var allItemsSnap = __instance.unsortedItems;
+        if (allItemsSnap != null)
+            for (int i = 0; i < allItemsSnap.Count; i++)
+            {
+                var it = allItemsSnap[i];
+                if (it != null) IconRecolor.Original[it.eItem] = it.rarity;
+            }
+
+        // Bob's Lantern → Legendary; Energy Core Legendary → Rare (weak item, better fit)
         var bobsLantern = __instance.GetItem(EItem.BobsLantern);
         var energyCore  = __instance.GetItem(EItem.EnergyCore);
         if (bobsLantern != null) bobsLantern.rarity = EItemRarity.Legendary;
-        if (energyCore  != null) energyCore.rarity  = EItemRarity.Epic;
+        if (energyCore  != null) energyCore.rarity  = EItemRarity.Rare;
 
-        // Swap Electric Plug (rare→epic) with Spiky Shield (epic→rare)
+        // Swap Golden Shield (rare→epic) with Slurp Gloves / GloveBlood (epic→rare)
+        var goldenShield = __instance.GetItem(EItem.GoldenShield);
+        var slurpGloves  = __instance.GetItem(EItem.GloveBlood);
+        if (goldenShield != null) goldenShield.rarity = EItemRarity.Epic;
+        if (slurpGloves  != null) slurpGloves.rarity  = EItemRarity.Rare;
+
+        // Swap Electric Plug (rare→epic); Spiky Shield (epic→legendary, buffed armor)
         var electricPlug = __instance.GetItem(EItem.ElectricPlug);
         var spikyShield  = __instance.GetItem(EItem.SpikyShield);
         if (electricPlug != null) electricPlug.rarity = EItemRarity.Epic;
-        if (spikyShield  != null) { spikyShield.rarity = EItemRarity.Rare; spikyShield.canAlwaysToggle = true; }
+        if (spikyShield  != null) { spikyShield.rarity = EItemRarity.Legendary; spikyShield.canAlwaysToggle = true; }
 
         // Swap Sucky Magnet (legendary→epic) with Scarf (legendary→rare)
         var suckyMagnet = __instance.GetItem(EItem.SuckyMagnet);
@@ -527,7 +681,12 @@ static class Patch_DataManager_Load
         foreach (var e in new[] { EItem.Skuleg, EItem.OldMask, EItem.Battery, EItem.Key })
         { var it = __instance.GetItem(e); if (it != null) it.canAlwaysToggle = false; }
 
-
+        // All rarity changes are done — recolor each changed item's baked rim at
+        // the source (swaps ItemData.icon) so every UI surface shows the new
+        // rarity color. Idempotent; skips items whose rarity we didn't change.
+        if (allItemsSnap != null)
+            for (int i = 0; i < allItemsSnap.Count; i++)
+                IconRecolor.RecolorSource(allItemsSnap[i]);
 
         var chars = __instance.unsortedCharacterData;
         if (chars != null)
@@ -587,6 +746,97 @@ static class Patch_DataManager_Load
             if (!found)
                 AddUpgradeStat(wd.upgradeData.upgradeModifiers, (EStat)16, 2f);
         }
+
+        // ── Bow fire-rate buff ──
+        // Fire interval = endCooldown / (baseAttackSpeed * globalAttackSpeed)  (burstTime=0).
+        // Stock endCooldown 0.92 (~1.1 shots/s) felt too slow; 0.45 ≈ 2.2 shots/s.
+        try
+        {
+            var bow = __instance.GetWeapon(EWeapon.Bow);
+            if (bow != null) bow.endCooldown = 0.45f;
+        }
+        catch (System.Exception e) { Plugin.Log.LogError($"[BowBuff] {e.Message}"); }
+
+        // ── Sniper tweak ──
+        // Keep stock burstTime 1.0 (the burst/audio stays in sync). Halve the post-burst
+        // recovery: endCooldown 1.0 → 0.5, so cycle = 0.5 + 1.0 = ~1.5s/shot (was 2.0s).
+        // Lower minBurstInterval 0.3 → 0.1 so heavy projectile stacking fires a tighter burst.
+        try
+        {
+            var snp = __instance.GetWeapon(EWeapon.Sniper);
+            if (snp != null)
+            {
+                snp.minBurstInterval = 0.1f;
+                snp.endCooldown      = 0.5f;
+            }
+        }
+        catch (System.Exception e) { Plugin.Log.LogError($"[SniperBuff] {e.Message}"); }
+
+        // ── Fire-rate buffs ──
+        // GetCooldown = endCooldown/atk + numProj × max( minBurstInterval/atk,
+        //               (burstTime/numProj)/atk, floor ); the burst term is
+        //               SKIPPED entirely when burstTime <= 0.
+        // These weapons are single-shot / burstTime-dominated, so the old
+        // minBurstInterval-only tweak did nothing. Scale ALL THREE timing fields
+        // by the divisor so every term shrinks → reliable ~div× faster firing.
+        foreach (var pair in new[]
+        {
+            (ew: EWeapon.BlackHole,   div: 3f),
+            (ew: EWeapon.Mine,        div: 2f),
+            (ew: EWeapon.HeroSword,   div: 2f),
+            (ew: EWeapon.PoisonFlask, div: 2f),
+            (ew: EWeapon.Sword,       div: 2f),
+            (ew: EWeapon.CorruptSword,div: 2f),
+        })
+        {
+            try
+            {
+                var w = __instance.GetWeapon(pair.ew);
+                if (w != null)
+                {
+                    w.endCooldown      /= pair.div;
+                    if (w.burstTime > 0f) w.burstTime /= pair.div;
+                    w.minBurstInterval /= pair.div;
+                }
+            }
+            catch (System.Exception e) { Plugin.Log.LogError($"[FireRateBuff:{pair.ew}] {e.Message}"); }
+        }
+
+        // ── Scythe attack rate ~doubled ──
+        // GetCooldown ≈ endCooldown + numProj×max(minBurstInterval, burstTime/numProj, floor).
+        // burstTime(1.5) dominates over endCooldown(0.85), so halve BOTH:
+        //   was 0.85 + 1.5 = 2.35s  →  0.425 + 0.75 = 1.175s (≈ half).
+        try
+        {
+            var scythe = __instance.GetWeapon(EWeapon.Scythe);
+            if (scythe != null)
+            {
+                scythe.endCooldown = 0.425f;
+                scythe.burstTime   = 0.75f;
+            }
+        }
+        catch (System.Exception e) { Plugin.Log.LogError($"[ScytheCooldown] {e.Message}"); }
+
+        // cache Noelle (Enduring) serialized size values for Hoarder size scaling
+        try
+        {
+            var noelle = __instance.GetCharacterData(ECharacter.Noelle);
+            var pd = noelle?.passive;
+            if (pd != null)
+            {
+                pd.Init(); // populates dummyPassive (PassiveData+0x38) if null
+                unsafe
+                {
+                    System.IntPtr dummy = *(System.IntPtr*)(pd.Pointer + 0x38);
+                    if (dummy != System.IntPtr.Zero)
+                    {
+                        Patch_Hoarder_EliteScaling.NoelleSizePerLevel = *(float*)(dummy + 0x18);
+                        Patch_Hoarder_EliteScaling.NoelleMaxSize      = *(float*)(dummy + 0x1C);
+                    }
+                }
+            }
+        }
+        catch { }
 
 
         // ── knockbackResistancePerMinute → 0 ──────────────────────────
@@ -1019,6 +1269,48 @@ static class Patch_GoldenRing_Remove
 }
 
 // ─────────────────────────────────────────────────────────────────
+// ZA WARUDO — track cumulative pickups; remove from pool at 25 total
+// Stack cap (10) handled by ActiveUncappedItems + GetItemCap above.
+// ─────────────────────────────────────────────────────────────────
+
+static class ZaWarudoTracker
+{
+    internal static int Total = 0;
+    internal const  int PoolCap = 25;
+
+    internal static void Reset() { Total = 0; }
+
+    internal static void OnReceived(int count)
+    {
+        Total += count;
+        if (Total >= PoolCap)
+            SizeCapHelper.RemoveFromPool(EItem.ZaWarudo);
+    }
+}
+
+[HarmonyPatch(typeof(ItemInventory), "AddItem", typeof(EItem), typeof(int))]
+static class Patch_ZaWarudo_Add
+{
+    [HarmonyPostfix]
+    static void Postfix(EItem eItem, int count)
+    {
+        if (eItem != EItem.ZaWarudo) return;
+        try { ZaWarudoTracker.OnReceived(count); } catch { }
+    }
+}
+
+[HarmonyPatch(typeof(ItemInventory), "AddItem", typeof(EItem))]
+static class Patch_ZaWarudo_Add_Single
+{
+    [HarmonyPostfix]
+    static void Postfix(EItem eItem)
+    {
+        if (eItem != EItem.ZaWarudo) return;
+        try { ZaWarudoTracker.OnReceived(1); } catch { }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // ECHO SHARD — overflow % becomes extra shard chances
 // ─────────────────────────────────────────────────────────────────
 
@@ -1037,44 +1329,53 @@ static class Patch_EchoShard_Overflow
 }
 
 // ─────────────────────────────────────────────────────────────────
-// GOLDEN RING — boost secret drop rate: 1/400 → 1/128
-// Postfix GetRandomChestItem: if the game didn't already give golden ring,
-// run our own check with the higher chance (same luck + legendary conditions).
+// CORRUPT (BOMBUS) CHEST — guaranteed Golden Ring.
+// The Corrupted-rarity pool is empty in the live game, so the original
+// GetRandomChestItem THROWS (index out of range) before returning. Skip
+// it entirely for Corrupt chests and hand back a Golden Ring.
+//
+// (The old 1/400 → 1/128 normal-chest drop-rate boost was removed — it
+//  inadvertently injected extra legendary-rarity rings on sub-legendary
+//  rolls. Only BOMBUS's rigged chest is special-cased now.)
 // ─────────────────────────────────────────────────────────────────
 
 [HarmonyPatch(typeof(ItemUtility), nameof(ItemUtility.GetRandomChestItem))]
-static class Patch_GoldenRing_DropRate
+static class Patch_GoldenRing_CorruptChest
 {
-    const float TargetChance = 1f / 128f; // desired chance per legendary chest roll
-    const float BaseChance   = 1f / 400f; // original game chance (already applied)
-    // Extra chance on top of the base so combined ≈ 1/128
-    const float ExtraChance  = TargetChance - BaseChance;
+    [HarmonyPrefix]
+    static bool Prefix(EChest chestType, ref ItemData __result)
+    {
+        if (chestType != EChest.Corrupt) return true; // normal chests: run original untouched
+        __result = DataManager.Instance?.GetItem(EItem.GoldenRing);
+        return false; // skip original
+    }
+}
 
-    [HarmonyPostfix]
-    static void Postfix(EChest chestType, float luck, ref ItemData __result)
+// ─────────────────────────────────────────────────────────────────
+// CORRUPT CHEST — routing (→ChestEvil encounter) and loot (→Corrupted
+// rarity items) are fully implemented; the dev just never assigned the
+// evil chest mesh/material in the ChestOpening prefab, so it renders
+// magenta. Fill the missing visual fields from the normal chest at
+// runtime so BOMBUS's corrupt chest drop displays + opens correctly.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(ChestOpening), "SetChest")]
+static class Patch_CorruptChest_Visual
+{
+    [HarmonyPrefix]
+    static void Prefix(ChestOpening __instance, EChest chestType)
     {
         try
         {
-            // Already gave golden ring — nothing to do
-            if (__result != null && __result.eItem == EItem.GoldenRing) return;
-
-            // Must be a legendary chest roll (same condition the game uses)
-            var items = RunUnlockables.availableItems;
-            if (items == null || !items.ContainsKey(EItemRarity.Legendary)) return;
-            var legList = items[EItemRarity.Legendary];
-            if (legList == null || legList.Count == 0) return;
-
-            // Luck gate — same threshold the game checks internally
-            if (luck <= 6f) return;
-
-            // Roll the extra chance
-            if (UnityEngine.Random.value < ExtraChance)
+            if (chestType == EChest.Corrupt)
             {
-                var ring = DataManager.Instance?.GetItem(EItem.GoldenRing);
-                if (ring != null) __result = ring;
+                // Force normal chest art onto the evil slots (dev left them unassigned)
+                __instance.meshEvil    = __instance.meshNormal;
+                __instance.matEvil     = __instance.matNormal;
+                if (__instance.fxCorrupted == null) __instance.fxCorrupted = __instance.fxFinal;
             }
         }
-        catch { }
+        catch (System.Exception e) { Plugin.Log.LogError($"[CorruptChest] {e.Message}"); }
     }
 }
 
@@ -1112,13 +1413,54 @@ static class Patch_Leaderboard_UploadScore_Entry
             if (pm != null)
                 unsafe { character = (int)(*(int*)((System.IntPtr)pm.Pointer + 0x1B8)); }
 
+            // Only submit if this beats the cached personal best for this character
+            if (PersonalTab.PersonalBests.TryGetValue(character, out int cachedBest) && score <= cachedBest)
+            {
+                Log.LogInfo($"[Leaderboard] Score {score} not a new record for char {character} (best={cachedBest}), skipping upload.");
+                return false;
+            }
+
             LeaderboardRelay.SendBothBoards(score, character);
+
+            // Update local cache immediately so back-to-back runs don't re-submit
+            PersonalTab.PersonalBests[character] = score;
         }
         catch (System.Exception ex)
         {
             Log.LogWarning($"Capture failed: {ex.Message}");
         }
         return false; // block all original logic — nothing reaches Steam or game servers
+    }
+}
+
+// FINAL PORTAL — winning the run by entering the final-stage portal does not
+// reliably upload the score (the game's win-path UploadScore fires late, after
+// the player is being torn down, so our relay never runs). Force the upload the
+// instant the player commits to the portal — Interact() returns true exactly
+// once (guarded by its `done` flag), and the player still exists at that point.
+// Routed through Leaderboards.UploadScore so our entry prefix handles relay,
+// dedup, and personal-best gating (the game's own call, if any, is deduped).
+[HarmonyPatch(typeof(InteractablePortalFinal), "Interact")]
+static class Patch_FinalPortal_UploadScore
+{
+    static readonly BepInEx.Logging.ManualLogSource Log =
+        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.FinalPortal");
+
+    [HarmonyPostfix]
+    static void Postfix(bool __result)
+    {
+        if (!__result) return; // interaction didn't start (already used)
+        try
+        {
+            int kills = Assets.Scripts.Saves___Serialization.Progression.Stats.RunStats
+                .GetStat(Assets.Scripts.Saves___Serialization.Progression.Stats.EMyStat.kills);
+            Log.LogInfo($"[FinalPortal] Run completed via final portal — uploading score (kills={kills}).");
+            Leaderboards.UploadScore(kills);
+        }
+        catch (System.Exception ex)
+        {
+            Log.LogError($"[FinalPortal] Score upload failed: {ex.Message}");
+        }
     }
 }
 
@@ -1271,6 +1613,14 @@ static class LeaderboardRelay
     internal static void Send(string board, int score, int character)
     {
         if (!Enabled) return;
+        if (ModGui.CheatsUsed) { Log.LogInfo("[Leaderboard] Score blocked — F1 menu used this run."); return; }
+
+        // Block if any mod other than ours is loaded from BepInEx plugins folder
+        if (ModGui.UnauthorizedMods.Count > 0)
+        {
+            Log.LogWarning($"[Leaderboard] Score blocked — unauthorized mods: {string.Join(", ", ModGui.UnauthorizedMods)}");
+            return;
+        }
         System.Threading.Tasks.Task.Run(async () =>
         {
             try
@@ -1349,8 +1699,8 @@ static class Patch_GetDamageContainer_BluetoothFix
             new[]
             {
                 typeof(WeaponBase),
-                HarmonyLib.AccessTools.TypeByName("ProjectileBase"),
-                HarmonyLib.AccessTools.TypeByName("Enemy"),
+                typeof(Assets.Scripts.Inventory__Items__Pickups.Weapons.Projectiles.ProjectileBase),
+                typeof(Enemy),
                 typeof(Vector3),
                 typeof(float),
             });
@@ -1575,6 +1925,29 @@ class ScrollWheelDetector : MonoBehaviour
 [HarmonyPatch(typeof(LeaderboardUiNew), "Refresh")]
 static class Patch_LeaderboardUiNew_Refresh
 {
+    // The game's Refresh() unconditionally accesses globalEntries[0] before its loop,
+    // with no bounds check. When we temporarily set an empty globalEntries list (waiting
+    // for server data), the re-invoked A_LeaderboardReady triggers Refresh → crash.
+    // Skip Refresh entirely when the leaderboard's globalEntries is empty.
+    [HarmonyPrefix]
+    static bool Prefix(LeaderboardUiNew __instance)
+    {
+        try
+        {
+            unsafe
+            {
+                // leaderboard field is at offset 0x48 (from dump.cs)
+                var lbPtr = *(System.IntPtr*)(__instance.Pointer + 0x48);
+                if (lbPtr == System.IntPtr.Zero) return true; // no leaderboard yet — let game handle
+                var lb = new SteamLeaderboardNew(lbPtr);
+                if (lb.globalEntries == null || lb.globalEntries.Count == 0)
+                    return false; // skip — would crash on globalEntries[0]
+            }
+        }
+        catch { }
+        return true;
+    }
+
     [HarmonyPostfix]
     static void Postfix(LeaderboardUiNew __instance)
     {
@@ -1599,14 +1972,12 @@ static class Patch_LeaderboardUiNew_Refresh
         }
         catch { }
 
-        PersonalTab.Init(__instance);
+        try { PersonalTab.Init(__instance); } catch { }
+        try { PersonalTab.BeginFetch(); }    catch { }
 
-        // Ensure fetch is in-flight as soon as the panel opens.
-        // BeginFetch is guarded by _fetching, so this is safe to call every Refresh.
-        PersonalTab.BeginFetch();
-
+        try
+        {
         // If Personal tab is active, Refresh just wiped our slots — restore immediately.
-        // Safe to call direct since Refresh has already finished populating leaderboardEntries.
         if (PersonalTab.IsActive)
         {
             PersonalTab.Redisplay();
@@ -1666,6 +2037,7 @@ static class Patch_LeaderboardUiNew_Refresh
                 try { slots[9]?.Clear(); } catch { }
             }
         }
+        } catch { }
     }
 }
 
@@ -1716,6 +2088,9 @@ static class PersonalTab
     static LeaderboardInjector.ServerEntry[]  _lastEntries = null;
     static bool                               _fetching    = false;
     static int                                _offset      = 0;
+
+    // characterIndex → personal best score, populated from /personal fetch
+    internal static readonly System.Collections.Generic.Dictionary<int, int> PersonalBests = new();
 
     internal static void Init(LeaderboardUiNew ui)
     {
@@ -1781,7 +2156,12 @@ static class PersonalTab
             {
                 _lastEntries = entries;
                 _fetching    = false;
-                Log.LogInfo($"Personal pre-fetch: {entries.Length} entries");
+                // Rebuild personal best cache
+                PersonalBests.Clear();
+                foreach (var e in entries)
+                    if (!PersonalBests.TryGetValue(e.CharacterIndex, out int prev) || e.Score > prev)
+                        PersonalBests[e.CharacterIndex] = e.Score;
+                Log.LogInfo($"Personal pre-fetch: {entries.Length} entries, {PersonalBests.Count} characters cached");
                 if (IsActive) Display(entries); // update live if tab already showing
             });
         });
@@ -1868,7 +2248,6 @@ static class PersonalTab
                 var e = entries[entryIdx];
                 bool wasActive = row.gameObject.activeSelf;
                 if (!wasActive) row.gameObject.SetActive(true);
-                Log.LogInfo($"Slot {i}: writing {e.Name} score={e.Score} char={e.CharacterIndex} (wasActive={wasActive})");
                 ((TMPro.TMP_Text)row.rank).SetText($"#{entryIdx + 1}");
                 ((TMPro.TMP_Text)row.playerName).SetText(e.Name ?? "?");
                 ((TMPro.TMP_Text)row.score).SetText(e.Score.ToString("N0"));
@@ -1884,7 +2263,6 @@ static class PersonalTab
                         }
                         break;
                     }
-                Log.LogInfo($"Slot {i}: OK");
             }
             catch (System.Exception ex) { Log.LogWarning($"Slot {i}: EXCEPTION {ex.Message}"); }
         }
@@ -1958,9 +2336,6 @@ static class Patch_Backpack_Desc
 [HarmonyPatch(typeof(ItemCursedDoll), "OnInitOrAmountChanged")]
 static class Patch_CursedDoll_Buff
 {
-    static readonly BepInEx.Logging.ManualLogSource CDLog =
-        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.CursedDollDump");
-
     [HarmonyPostfix]
     static unsafe void Postfix(ItemCursedDoll __instance)
     {
@@ -1970,18 +2345,32 @@ static class Patch_CursedDoll_Buff
         *(int*)(p + 0x38)   = 7;                 // enemiesCursedPerDoll   2   → 7
         *(int*)(p + 0x3C)   = 7;                 // maxNumCursesPerCheck   5   → 7
         *(int*)(p + 0x30)   = 7 * amount;        // maxNumCursedEnemies    recalc
-
-        // DIAGNOSTIC: dump offsets to verify all CursedDoll field offsets
-        var sb = new System.Text.StringBuilder();
-        sb.Append("[CursedDollDump] offsets:");
-        for (int off = 0x18; off <= 0x60; off += 4)
-        {
-            int   asInt   = *(int*)  (p + off);
-            float asFloat = *(float*)(p + off);
-            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
-        }
-        CDLog.LogInfo(sb.ToString());
     }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// SPIKY SHIELD — armorPerAmount 10 → 50.
+// Armor stat is built in OnInitOrAmountChanged as amount × armorPerAmount(0x30)
+// and fed through the game's hyperbolic armor→DR curve (never reaches 100%).
+// We set the RAW per-stack value (0x30); set BEFORE the method reads it (prefix).
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(ItemSpikyShield), "OnInitOrAmountChanged")]
+static class Patch_SpikyShield_Armor
+{
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemSpikyShield __instance)
+        => *(float*)(__instance.Pointer + 0x30) = 0.5f;  // armorPerAmount 0.10 (10%) → 0.50 (50%)
+}
+
+// Description ("Also gain 10% Armor") is built in GetLocalizationKeys from the
+// same armorPerAmount(0x30) field. The unlock-menu preview instance never runs
+// OnInitOrAmountChanged, so set the field here too → description shows 50%.
+[HarmonyPatch(typeof(ItemSpikyShield), "GetLocalizationKeys")]
+static class Patch_SpikyShield_Desc
+{
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemSpikyShield __instance)
+        => *(float*)(__instance.Pointer + 0x30) = 0.5f;  // armorPerAmount 0.10 (10%) → 0.50 (50%)
 }
 
 [HarmonyPatch(typeof(ItemCursedDoll), "GetDescription")]
@@ -2100,6 +2489,58 @@ static class Patch_Zooma_Init_Projectiles
 }
 
 // ─────────────────────────────────────────────────────────────────
+// ROBERTO (Hoarder passive) — +0.5% elite damage per level
+// Mirrors the Tony/Zooma pattern: subscribe to PlayerXp.A_LevelUp and push
+// player StatModifiers via PassiveAbility.SetStat (auto-aggregated, replaced each level).
+//   EliteDamageMultiplier = 23. 0.5% = 0.005f (Greed convention).
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(PassiveAbilityHoarder), "Init")]
+static class Patch_Hoarder_EliteScaling
+{
+    static readonly System.Reflection.MethodInfo _setStat =
+        HarmonyLib.AccessTools.Method(typeof(PassiveAbility), "SetStat");
+
+    // Noelle (Enduring) serialized size values, cached at DataManager.Load.
+    public static float NoelleSizePerLevel = 0f;
+    public static float NoelleMaxSize      = 0f;
+
+    static System.Action<int> _handler;
+
+    [HarmonyPostfix]
+    static void Postfix(PassiveAbilityHoarder __instance)
+    {
+        if (_handler != null) PlayerXp.A_LevelUp -= _handler;
+        _handler = level =>
+        {
+            try
+            {
+                float val = 0.005f * level;
+
+                var dmg = new StatModifier();
+                dmg.stat         = (EStat)23; // EliteDamageMultiplier
+                dmg.modifyType   = EStatModifyType.Addition;
+                dmg.modification = val;
+                _setStat.Invoke(__instance, new object[] { dmg });
+
+                // 1/3 of Noelle's size-per-level, capped at 1/3 of her max (same Flat model as Enduring)
+                if (NoelleSizePerLevel > 0f)
+                {
+                    float sizeVal = System.Math.Min(level * (NoelleSizePerLevel / 3f), NoelleMaxSize / 3f);
+                    var size = new StatModifier();
+                    size.stat         = (EStat)9; // SizeMultiplier
+                    size.modifyType   = EStatModifyType.Flat;
+                    size.modification = sizeVal;
+                    _setStat.Invoke(__instance, new object[] { size });
+                }
+            }
+            catch { }
+        };
+        PlayerXp.A_LevelUp += _handler;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
 // GOLDEN SHIELD — remove reduced gold from Kevin self-damage
 // ─────────────────────────────────────────────────────────────────
 
@@ -2129,9 +2570,41 @@ static class Patch_MainMenu_Start_Version
     {
         ModGui.MainThread.Enqueue(() => ModGui.NeedVersionPatch = true);
         CheckVersionAsync();
-        // Pre-fetch personal leaderboard data early so it's ready before the user
-        // opens the leaderboard and clicks the Personal tab
         PersonalTab.BeginFetch();
+        CheckUnauthorizedMods();
+    }
+
+    static void CheckUnauthorizedMods()
+    {
+        ModGui.UnauthorizedMods.Clear();
+        try
+        {
+            var chainloader = BepInEx.Unity.IL2CPP.IL2CPPChainloader.Instance;
+
+            var prop = chainloader.GetType().GetProperty("Plugins",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Instance);
+
+            if (prop == null) { Log.LogError("[ModCheck] Plugins property not found."); return; }
+
+            if (prop.GetValue(chainloader) is System.Collections.IDictionary plugins)
+            {
+                Log.LogInfo($"[ModCheck] {plugins.Count} plugin(s) loaded.");
+                foreach (var key in plugins.Keys)
+                {
+                    if (key.ToString() == "com.megabonk.mod") continue;
+                    Log.LogWarning($"[ModCheck] Unauthorized plugin: {key}");
+                    ModGui.UnauthorizedMods.Add(key.ToString());
+                }
+            }
+            else { Log.LogError("[ModCheck] Plugins cast failed."); }
+        }
+        catch (System.Exception ex)
+        {
+            Log.LogError($"[ModCheck] Failed: {ex.Message}");
+        }
+        if (ModGui.UnauthorizedMods.Count == 0)
+            Log.LogInfo("[ModCheck] No unauthorized mods detected.");
     }
 
     static void CheckVersionAsync()
@@ -2204,7 +2677,15 @@ static class Patch_GameManager_StartPlaying_Chart
 static class Patch_GameManager_OnDied_Chart
 {
     [HarmonyPostfix]
-    static void Postfix() => ModGui.ChartDisabled = true;
+    static void Postfix()
+    {
+        ModGui.ChartDisabled = true;
+        // If the chart was toggled this run it left the shared StatsWindows
+        // object mutated (hidden Confirm window, moved transform, custom canvas,
+        // stale rows). Revert so the real death screen works.
+        var gui = UnityEngine.Object.FindObjectOfType<ModGui>();
+        gui?.RestoreForDeath();
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -2230,102 +2711,702 @@ static class Patch_CombatScaling_DamageMultiplier
 }
 
 // ─────────────────────────────────────────────────────────────────
-// CACTUS — numProjectilesPerAmount = 4; ray distance scales with size
-// TODO: patch not working, archived for now
+// GOD MODE — block all incoming player damage when enabled
 // ─────────────────────────────────────────────────────────────────
 
-/*
-// Force numProjectilesPerAmount before the game computes numProjectiles
-[HarmonyPatch(typeof(ItemCactus), "OnInitOrAmountChanged")]
-static class Patch_Cactus_OnInitOrAmountChanged
+[HarmonyPatch(typeof(PlayerHealth), "DamagePlayer",
+    new System.Type[] { typeof(Enemy), typeof(Vector3), typeof(DcFlags) })]
+static class Patch_GodMode
 {
-    static readonly BepInEx.Logging.ManualLogSource CactusLog =
-        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.CactusDump");
-
     [HarmonyPrefix]
-    static unsafe void Prefix(ItemCactus __instance)
-    {
-        *(int*)(__instance.Pointer + 0x34) = 4; // numProjectilesPerAmount
-    }
+    static bool Prefix() => !ModGui.GodMode; // return false = skip original
+}
 
+// ─────────────────────────────────────────────────────────────────
+// BOMBUS — speed scales with overtime (1%/sec of base) AND inversely
+// with size (smaller = up to 2x faster). Per-instance.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Enemy), "GetSpeed")]
+static class Patch_BOMBUS_Speed
+{
     [HarmonyPostfix]
-    static unsafe void Postfix(ItemCactus __instance)
+    static void Postfix(Enemy __instance, ref float __result)
     {
-        // DIAGNOSTIC: dump int and float values at offsets 0x30–0x70
-        var sb = new System.Text.StringBuilder();
-        sb.Append("[CactusDump] offsets:");
-        for (int off = 0x28; off <= 0x70; off += 4)
-        {
-            int   asInt   = *(int*)  (__instance.Pointer + off);
-            float asFloat = *(float*)(__instance.Pointer + off);
-            sb.Append($"\n  0x{off:X2}: int={asInt,6}  float={asFloat,10:F4}");
-        }
-        CactusLog.LogInfo(sb.ToString());
+        if (GiantBeeState.IsBombus(__instance))
+            __result = GiantBeeState.GetBombusSpeed(__instance);
     }
 }
-*/
 
-// Scale visual thorn range with player SizeMultiplier.
-// ParticleOpacity.Awake fires when CactusProjectile is instantiated,
-// before the particle system emits its burst — ideal time to scale startSpeed and velocity cap.
-// TODO: patch not working, commented out for now
-/*
-[HarmonyPatch(typeof(ParticleOpacity), "Awake")]
-static class Patch_CactusProjectile_ScaleParticles
+// ─────────────────────────────────────────────────────────────────
+// BOMBUS — immune to all debuffs (kept even though no longer invulnerable)
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Enemy), "AddDebuff")]
+static class Patch_BOMBUS_DebuffImmune
 {
-    static readonly BepInEx.Logging.ManualLogSource Log =
-        BepInEx.Logging.Logger.CreateLogSource("MegaBonkMod.Cactus");
+    [HarmonyPrefix]
+    static bool Prefix(Enemy __instance) => !GiantBeeState.IsBombus(__instance); // false = skip debuff
+}
 
+// ─────────────────────────────────────────────────────────────────
+// BOMBUS — immune to executes. Both execute sources (Dexecutioner weapon,
+// Joe's Dagger) deliver the instakill as a DamageContainer with isExecute=true.
+// Skip those for BOMBUS; normal (isExecute==false) hits still apply full damage.
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Enemy), "Damage")]
+static class Patch_BOMBUS_ExecuteImmune
+{
+    [HarmonyPrefix]
+    static bool Prefix(Enemy __instance, DamageContainer damageContainer)
+        => !(damageContainer != null && damageContainer.isExecute && GiantBeeState.IsBombus(__instance)); // false = skip execute hit
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INSTAKILL — any hit from player weapon/other kills enemy instantly
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Enemy), "DamageFromPlayerWeapon")]
+static class Patch_InstaKill_Weapon
+{
+    [HarmonyPrefix]
+    static bool Prefix(Enemy __instance)
+    {
+        if (!ModGui.InstaKill) return true;
+        try { __instance.Kill("instakill"); } catch { }
+        return false;
+    }
+}
+
+[HarmonyPatch(typeof(Enemy), "DamageFromPlayerOther")]
+static class Patch_InstaKill_Other
+{
+    [HarmonyPrefix]
+    static bool Prefix(Enemy __instance)
+    {
+        if (!ModGui.InstaKill) return true;
+        try { __instance.Kill("instakill"); } catch { }
+        return false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// FREEZE ENEMIES — return 0 speed so movement system idles
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Enemy), "GetSpeed")]
+static class Patch_FreezeEnemies
+{
     [HarmonyPostfix]
-    static void Postfix(ParticleOpacity __instance)
+    static void Postfix(ref float __result)
+    {
+        if (ModGui.FreezeEnemies) __result = 0f;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// STAGE TIMER HELPER — advance stageTimer by N seconds (F1 menu button)
+// Uses same static pointer pattern as Patch_MyTime_Update_SlowStageTimer.
+// ─────────────────────────────────────────────────────────────────
+
+static class StageTimerHelper
+{
+    static System.IntPtr _statics = System.IntPtr.Zero;
+
+    static unsafe System.IntPtr GetStatics()
+    {
+        if (_statics != System.IntPtr.Zero) return _statics;
+        var dm = DataManager.Instance;
+        if (dm == null) return System.IntPtr.Zero;
+        var image = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_get_image(
+                        Il2CppInterop.Runtime.IL2CPP.il2cpp_object_get_class(dm.Pointer));
+        var cls   = Il2CppInterop.Runtime.IL2CPP.il2cpp_class_from_name(
+                        image, "Assets.Scripts.Utility", "MyTime");
+        if (cls == System.IntPtr.Zero) return System.IntPtr.Zero;
+        _statics = *(System.IntPtr*)(cls + 0xB8);
+        return _statics;
+    }
+
+    internal static unsafe float GetFinalSwarmTimer()
     {
         try
         {
-            string goName = __instance.gameObject.name;
+            var statics = GetStatics();
+            if (statics == System.IntPtr.Zero) return 0f;
+            return *(float*)(statics + 0x24);
+        }
+        catch { return 0f; }
+    }
 
-            // Guard: only affect CactusProjectile instances
-            if (!goName.Contains("Cactus"))
+    internal static unsafe void Advance(float seconds)
+    {
+        try
+        {
+            var statics = GetStatics();
+            if (statics == System.IntPtr.Zero) return;
+            float stageTimer = *(float*)(statics + 0x1C);
+            if (stageTimer < 600f)
+                *(float*)(statics + 0x1C) = System.Math.Max(0f, System.Math.Min(stageTimer + seconds, 600f));
+            else
             {
-                Log.LogDebug($"[CactusPS] Awake on non-cactus GO '{goName}' — skipped");
-                return;
+                float swarm = *(float*)(statics + 0x24);
+                float newSwarm = swarm + seconds;
+                if (newSwarm < 0f) // went back before overtime — drop back into normal stage
+                {
+                    *(float*)(statics + 0x1C) = System.Math.Max(0f, 600f + newSwarm);
+                    *(float*)(statics + 0x24) = 0f;
+                }
+                else
+                    *(float*)(statics + 0x24) = newSwarm;
             }
+        }
+        catch { }
+    }
+}
 
-            var psSystems = __instance.particleSystems;
-            int psCount = psSystems?.Length ?? -1;
+// ─────────────────────────────────────────────────────────────────
+// CACTUS — thorn range scales with player SizeMultiplier
+// Cactus hit detection uses Physics.SphereCastNonAlloc internally.
+// We scale maxDistance by SizeMultiplier, guarded by an OnTakeDamage
+// counter so we only affect sphere casts that happen during cactus damage.
+// Visual: scale the spawned projectile's localScale from the pool.
+// ─────────────────────────────────────────────────────────────────
 
-            float sizeMult = 1f;
-            try { sizeMult = PlayerStats.GetStat(EStat.SizeMultiplier); }
-            catch (System.Exception ex) { Log.LogError($"[CactusPS] GetStat threw: {ex.Message}"); }
-            if (sizeMult <= 0f) sizeMult = 1f;
+static class CactusState
+{
+    internal static int Depth = 0; // incremented while inside ItemCactus.OnTakeDamage
+}
 
-            Log.LogInfo($"[CactusPS] Awake '{goName}' psCount={psCount} sizeMult={sizeMult:F3}");
+// 4 projectiles per cactus stack (base = 4, +4 per additional stack)
+[HarmonyPatch(typeof(ItemCactus), "OnInitOrAmountChanged")]
+static class Patch_Cactus_OnInitOrAmountChanged
+{
+    [HarmonyPrefix]
+    static unsafe void Prefix(ItemCactus __instance)
+    {
+        *(int*)(__instance.Pointer + 0x34) = 3; // numProjectilesPerAmount → results in 4 per stack (game adds 1)
+    }
+}
 
-            if (psSystems == null || psSystems.Length == 0) return;
-            if (System.Math.Abs(sizeMult - 1f) < 0.01f) return; // base size, nothing to do
+[HarmonyPatch(typeof(ItemCactus), "OnTakeDamage")]
+static class Patch_Cactus_OnTakeDamage
+{
+    [HarmonyPrefix]  static void Prefix()  => CactusState.Depth++;
+    [HarmonyPostfix] static void Postfix() => CactusState.Depth--;
+}
 
-            for (int i = 0; i < psSystems.Length; i++)
-            {
-                var ps = psSystems[i];
-                if (ps == null) continue;
+// Patch all SphereCastNonAlloc overloads — scale maxDistance when inside cactus damage
+[HarmonyPatch(typeof(UnityEngine.Physics), "SphereCastNonAlloc",
+    new System.Type[] { typeof(UnityEngine.Vector3), typeof(float), typeof(UnityEngine.Vector3),
+        typeof(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<UnityEngine.RaycastHit>),
+        typeof(float), typeof(int), typeof(UnityEngine.QueryTriggerInteraction) })]
+static class Patch_SphereCast1 { [HarmonyPrefix] static void Prefix(ref float maxDistance) => CactusScaleHelper.Scale(ref maxDistance); }
 
-                // Scale both launch speed and lifetime proportionally.
-                // Together they scale visual range ≈ linearly with sizeMult:
-                //   higher startSpeed = more distance in initial burst frames
-                //   longer lifetime   = more travel time at residual velocity
-                var main = ps.main;
-                main.startSpeedMultiplier    = sizeMult;
-                main.startLifetimeMultiplier = sizeMult;
-                Log.LogInfo($"[CactusPS] Applied speedMult={sizeMult:F3} lifetimeMult={sizeMult:F3}");
-            }
+[HarmonyPatch(typeof(UnityEngine.Physics), "SphereCastNonAlloc",
+    new System.Type[] { typeof(UnityEngine.Vector3), typeof(float), typeof(UnityEngine.Vector3),
+        typeof(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<UnityEngine.RaycastHit>),
+        typeof(float), typeof(int) })]
+static class Patch_SphereCast2 { [HarmonyPrefix] static void Prefix(ref float maxDistance) => CactusScaleHelper.Scale(ref maxDistance); }
+
+[HarmonyPatch(typeof(UnityEngine.Physics), "SphereCastNonAlloc",
+    new System.Type[] { typeof(UnityEngine.Vector3), typeof(float), typeof(UnityEngine.Vector3),
+        typeof(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<UnityEngine.RaycastHit>),
+        typeof(float) })]
+static class Patch_SphereCast3 { [HarmonyPrefix] static void Prefix(ref float maxDistance) => CactusScaleHelper.Scale(ref maxDistance); }
+
+[HarmonyPatch(typeof(UnityEngine.Physics), "SphereCastNonAlloc",
+    new System.Type[] { typeof(UnityEngine.Ray), typeof(float),
+        typeof(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<UnityEngine.RaycastHit>),
+        typeof(float), typeof(int), typeof(UnityEngine.QueryTriggerInteraction) })]
+static class Patch_SphereCast4 { [HarmonyPrefix] static void Prefix(ref float maxDistance) => CactusScaleHelper.Scale(ref maxDistance); }
+
+[HarmonyPatch(typeof(UnityEngine.Physics), "SphereCastNonAlloc",
+    new System.Type[] { typeof(UnityEngine.Ray), typeof(float),
+        typeof(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<UnityEngine.RaycastHit>),
+        typeof(float), typeof(int) })]
+static class Patch_SphereCast5 { [HarmonyPrefix] static void Prefix(ref float maxDistance) => CactusScaleHelper.Scale(ref maxDistance); }
+
+[HarmonyPatch(typeof(UnityEngine.Physics), "SphereCastNonAlloc",
+    new System.Type[] { typeof(UnityEngine.Ray), typeof(float),
+        typeof(Il2CppInterop.Runtime.InteropTypes.Arrays.Il2CppStructArray<UnityEngine.RaycastHit>),
+        typeof(float) })]
+static class Patch_SphereCast6 { [HarmonyPrefix] static void Prefix(ref float maxDistance) => CactusScaleHelper.Scale(ref maxDistance); }
+
+static class CactusScaleHelper
+{
+    internal static void Scale(ref float maxDistance)
+    {
+        if (CactusState.Depth <= 0) return;
+        try
+        {
+            float size = PlayerStats.GetStat(EStat.SizeMultiplier);
+            if (size > 0f) maxDistance *= size;
+        }
+        catch { }
+    }
+}
+// ─────────────────────────────────────────────────────────────────
+// BOMBUS — spawns at 15 min overtime, then every 5 min (STACKING).
+// 15× scale, KILLABLE (no invulnerability), debuff-immune.
+// HP scales with overtime. Speed scales with overtime + inversely with size.
+// Drops a Corrupt chest on death. Multiple tracked per-instance.
+// ─────────────────────────────────────────────────────────────────
+
+static class GiantBeeState
+{
+    internal const float Scale    = 15f;
+    internal const float ScaleMin = 1.5f;  // smallest BOMBUS shrinks to (world units → fraction MinFrac); low enough to fit tight gaps players hid in
+    internal const float IconScale = 10f;  // boss map icon size relative to a normal bee dot (1/Scale was too tiny)
+
+    // ── tuning (flag for playtest) ──
+    const float FirstSpawnSwarm  = 15f * 60f;  // first spawn at 15 min overtime (finalSwarmTimer) on stage 1
+    const float StageArrivalStep = 5f  * 60f;  // each later stage delays BOMBUS's first arrival by +5 min
+    const float SpawnInterval    = 5f  * 60f;  // then every 5 min
+    const float BaseSpeed        = 32f;
+    const float SpeedTimeRate    = 0.005f;     // +0.5% of base per second past first spawn (was 1%; reduced so 3rd-spawn stays kiteable)
+    const float MaxSpeed         = 140f;        // hard speed cap (was 250; lowered so a move-speed player can still outrun)
+    const float BossHpMult       = 20f;        // multiplier on bee's natural overtime-scaled HP
+    const float AoeRange         = 40f;        // ~15× bee radius at full size
+    const float AoeInterval      = 0.5f;
+
+    internal class Bombus
+    {
+        public Enemy   enemy;
+        public Vector3 spawnScale    = Vector3.one;
+        public float   curScale      = 1f;
+        public float   scaleVelocity = 0f;
+        public float   lastHitTime   = -999f;
+        public Transform mapIcon     = null;          // minimap icon child (layer 14)
+        public Vector3   mapIconBase = Vector3.one;    // its original localScale
+    }
+
+    static readonly System.Collections.Generic.Dictionary<System.IntPtr, Bombus> _active
+        = new System.Collections.Generic.Dictionary<System.IntPtr, Bombus>();
+    static readonly System.Collections.Generic.List<System.IntPtr> _deadScratch
+        = new System.Collections.Generic.List<System.IntPtr>();
+
+    internal static bool         PhaseActive     = false; // true once overtime BOMBUS phase begins
+    internal static bool         SpawningNow     = false; // bypass flag during our own SpawnEnemy
+    internal static float        RunTimerAtSpawn = -1f;
+    internal static PlayerHealth PhInstance      = null;
+
+    static float _nextSpawnSwarm = FirstSpawnSwarm;
+    static float _aoeTimer       = 0f;
+
+    static float MinFrac => ScaleMin / Scale;
+
+    internal static bool IsBombus(Enemy e)
+        => e != null && _active.ContainsKey(e.Pointer);
+
+    // Ghost family — players wanted the overtime ghost swarm to keep spawning during BOMBUS.
+    static readonly System.Collections.Generic.HashSet<EEnemy> GhostKinds = new()
+    {
+        EEnemy.Ghost, EEnemy.GreaterGhost, EEnemy.GhostRed, EEnemy.GhostPurple,
+        EEnemy.GhostKing, EEnemy.GhostGrave1, EEnemy.GhostGrave2, EEnemy.GhostGrave3,
+        EEnemy.GhostGrave4, EEnemy.GhostInvincible, EEnemy.Ghostham,
+    };
+
+    internal static bool IsGhost(EnemyData d)
+        => d != null && GhostKinds.Contains(d.enemyName);
+
+    internal static float GetBombusSpeed(Enemy e)
+    {
+        float cur = 1f;
+        if (e != null && _active.TryGetValue(e.Pointer, out var b)) cur = b.curScale;
+        float swarm    = StageTimerHelper.GetFinalSwarmTimer();
+        float t        = System.Math.Max(0f, swarm - FirstSpawnSwarm);
+        float timeMult = 1f + SpeedTimeRate * t;                            // overtime ramp
+        float sizeMult = Mathf.Lerp(1f, 2f, (1f - cur) / (1f - MinFrac));   // smaller = up to 2x
+        return Mathf.Clamp(BaseSpeed * timeMult * sizeMult, BaseSpeed, MaxSpeed);
+    }
+
+    internal static void OnHitPlayer(Enemy e)
+    {
+        if (e != null && _active.TryGetValue(e.Pointer, out var b))
+            b.lastHitTime = Time.time; // grow back smoothly after hit
+    }
+
+    internal static void Reset()
+    {
+        _active.Clear();
+        PhaseActive     = false;
+        RunTimerAtSpawn = -1f;
+        _nextSpawnSwarm = FirstSpawnSwarm + FirstArrivalOffset();
+        _aoeTimer       = 0f;
+    }
+
+    // Later stages push BOMBUS's first arrival back by StageArrivalStep each.
+    // Stage 1 (index 0) = no offset; stage 2 = +5 min; stage 3 = +10 min; ...
+    static float FirstArrivalOffset()
+    {
+        try
+        {
+            int idx = Assets.Scripts.Managers.MapController.GetStageIndex();
+            if (idx > 0) return idx * StageArrivalStep;
+        }
+        catch { }
+        return 0f;
+    }
+
+    // runTimer went backwards = true new run/stage
+    internal static void CheckNewRun()
+    {
+        if (!PhaseActive || RunTimerAtSpawn < 0f) return;
+        if (MyTime.runTimer < RunTimerAtSpawn - 30f) Reset();
+    }
+
+    internal static void OnBombusDied(Enemy enemy)
+    {
+        if (enemy == null || !_active.ContainsKey(enemy.Pointer)) return;
+        Vector3 pos = Vector3.zero;
+        try { pos = enemy.transform.position; } catch { }
+        _active.Remove(enemy.Pointer);
+        // Disable the corpse's colliders so the ground raycast doesn't hit the bee
+        try { foreach (var c in enemy.gameObject.GetComponentsInChildren<Collider>()) c.enabled = false; }
+        catch { }
+        DropCorruptChest(pos);
+        Plugin.Log.LogInfo($"[GiantBee] BOMBUS died, corrupt chest dropped (active={_active.Count})");
+    }
+
+    static void DropCorruptChest(Vector3 pos)
+    {
+        try
+        {
+            var em = EffectManager.Instance;
+            if (em == null || em.openChestNormal == null) return;
+            pos = GroundChestPos(pos); // 15× bee center sits high; snap to ground
+            var go = UnityEngine.Object.Instantiate(em.openChestNormal, pos, Quaternion.identity);
+            var oc = go.GetComponent<OpenChest>();
+            if (oc != null) oc.chestType = EChest.Corrupt;  // no corrupt prefab exists; reuse normal + override
         }
         catch (System.Exception ex)
         {
-            Plugin.Log.LogError($"[CactusPS] Exception: {ex}");
+            Plugin.Log.LogError($"[GiantBee] chest drop failed: {ex.Message}");
+        }
+    }
+
+    // Raycast down to find the ground so the chest sits on the floor instead
+    // of floating where the giant bee's (high) center died.
+    static Vector3 GroundChestPos(Vector3 pos)
+    {
+        try
+        {
+            var origin = new Vector3(pos.x, pos.y + 50f, pos.z);
+            if (Physics.Raycast(origin, Vector3.down, out var hit, 500f,
+                    Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
+            {
+                pos.y = hit.point.y;
+                return pos;
+            }
+        }
+        catch { }
+        var pm = PlayerMovement.Instance;
+        if (pm != null) pos.y = pm.transform.position.y; // fallback
+        return pos;
+    }
+
+    // Called each frame from MyTime.Update postfix
+    internal static void Tick()
+    {
+        CheckNewRun();
+
+        // Spawn scheduling — 15 min, then every 5 min (catch up if ticks skipped)
+        if (MyTime.stageTimer >= 600f)
+        {
+            float swarm = StageTimerHelper.GetFinalSwarmTimer();
+            int guard = 0;
+            while (swarm >= _nextSpawnSwarm && guard++ < 8)
+            {
+                Spawn();
+                _nextSpawnSwarm += SpawnInterval;
+            }
+        }
+
+        if (_active.Count == 0) return;
+
+        _aoeTimer += Time.deltaTime;
+        bool doAoe = _aoeTimer >= AoeInterval;
+        if (doAoe) _aoeTimer = 0f;
+
+        var pm = PlayerMovement.Instance;
+        _deadScratch.Clear();
+
+        foreach (var kv in _active)
+        {
+            var b    = kv.Value;
+            var inst = b.enemy;
+            if (inst == null || inst.Pointer == System.IntPtr.Zero) { _deadScratch.Add(kv.Key); continue; }
+            bool alive; try { alive = inst.hp > 0f; } catch { alive = false; }
+            if (!alive) { _deadScratch.Add(kv.Key); continue; }
+            if (pm == null) continue;
+
+            try
+            {
+                Vector3 ppos = pm.transform.position;
+                float dist        = (inst.transform.position - ppos).magnitude;
+                float aoeNow      = AoeRange * b.curScale;
+                bool  playerNear  = dist <= aoeNow * 4f;
+                bool  hitRecently = (Time.time - b.lastHitTime) < 5f;
+
+                float targetScale = (playerNear && !hitRecently) ? MinFrac : 1f;
+                float smoothTime  = targetScale < b.curScale ? 4f : 1.5f; // shrink slower than grow
+                b.curScale = Mathf.SmoothDamp(b.curScale, targetScale, ref b.scaleVelocity, smoothTime);
+                inst.transform.localScale = b.spawnScale * b.curScale;
+
+                // Negate body scale (Scale × curScale) on the minimap icon so it
+                // stays a normal bee-sized dot regardless of the boss's animation.
+                if (b.mapIcon != null)
+                {
+                    float div = Scale * b.curScale;
+                    if (div > 0.0001f) b.mapIcon.localScale = b.mapIconBase * (IconScale / div);
+                }
+
+                // Range-based one-shot — catches corners BOMBUS can't physically reach
+                if (doAoe && PhInstance != null && dist <= aoeNow)
+                    PhInstance.DamagePlayer(inst, ppos, DcFlags.None);
+            }
+            catch { }
+        }
+
+        for (int i = 0; i < _deadScratch.Count; i++) _active.Remove(_deadScratch[i]);
+    }
+
+    internal static void Spawn(bool manualOverride = false)
+    {
+        try
+        {
+            var em = EnemyManager.Instance;
+            var dm = DataManager.Instance;
+            if (em == null || dm == null) return;
+
+            var beeData = dm.GetEnemyData(EEnemy.Bee);
+            if (beeData == null) return;
+
+            var pos = SpawnPositions.GetEnemySpawnPosition(beeData);
+            if (pos == SpawnPositions.INVALID_POS || pos == Vector3.zero)
+            {
+                var pmv = PlayerMovement.Instance;
+                pos = pmv != null
+                    ? pmv.transform.position + new Vector3(5f, 0f, 5f)
+                    : Vector3.zero;
+            }
+
+            SpawningNow = true;
+            var enemy = em.SpawnEnemy(beeData, pos, 0, forceSpawn: true,
+                            flag: EEnemyFlag.Boss, canBeElite: false,
+                            extraSizeMultiplier: Scale);
+            SpawningNow = false;
+
+            if (enemy != null)
+            {
+                // NO MakeInvulnerable — BOMBUS killable now. Debuff immunity kept via AddDebuff patch.
+
+                // Tanky boss — multiply bee's natural (already overtime-scaled) HP
+                try
+                {
+                    float nat = enemy.maxHp;
+                    if (nat <= 0f) nat = enemy.hp;
+                    float hp = nat * BossHpMult;
+                    enemy.maxHp = hp; enemy.hp = hp;
+                }
+                catch { }
+
+                _active[enemy.Pointer] = new Bombus
+                {
+                    enemy       = enemy,
+                    spawnScale  = enemy.transform.localScale,
+                    curScale    = 1f,
+                    lastHitTime = -999f
+                };
+
+                // Fix collider shape — bee base collider is flat; force upright capsule
+                try
+                {
+                    foreach (var col in enemy.gameObject.GetComponentsInChildren<CapsuleCollider>())
+                    {
+                        col.direction = 1;               // Y-axis (upright)
+                        col.height    = col.radius * 2f; // roughly spherical
+                    }
+                }
+                catch { }
+
+                // Minimap icon is a child of the enemy, so it inherits the 15× body
+                // scale → giant blob on the map. Grab it and counter-scale (in Tick)
+                // so it renders at a normal bee's icon size.
+                try
+                {
+                    if (_active.TryGetValue(enemy.Pointer, out var bb))
+                    {
+                        foreach (var tr in enemy.gameObject.GetComponentsInChildren<Transform>(true))
+                        {
+                            if (tr.gameObject.layer == 14) // minimap layer
+                            {
+                                bb.mapIcon     = tr;
+                                bb.mapIconBase = tr.localScale;
+                                tr.localScale  = bb.mapIconBase * (IconScale / Scale); // curScale==1 at spawn
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            PhaseActive     = true;
+            RunTimerAtSpawn = MyTime.runTimer;
+            Plugin.Log.LogInfo($"[GiantBee] BOMBUS spawned (active={_active.Count}) swarm={StageTimerHelper.GetFinalSwarmTimer():F0}s pos={pos}");
+
+            // Boss alert with custom text
+            try
+            {
+                var alertUi = UnityEngine.Object.FindObjectOfType<AlertUi>();
+                if (alertUi != null)
+                {
+                    alertUi.SetAlertBoss();
+                    if (alertUi.t_alert != null)
+                        alertUi.t_alert.text = "BOMBUS IS APPROACHING...";
+                }
+            }
+            catch { }
+        }
+        catch (System.Exception ex)
+        {
+            SpawningNow = false;
+            Plugin.Log.LogError($"[GiantBee] spawn failed: {ex.Message}");
         }
     }
 }
-*/
+
+// Give BOMBUS her name — patch GetName so the boss HP bar shows it.
+// Only applies after BOMBUS has been spawned; regular bees are unaffected
+// because they never show a name bar.
+[HarmonyPatch(typeof(EnemyData), "GetName")]
+static class Patch_EnemyData_GetName_BOMBUS
+{
+    [HarmonyPostfix]
+    static void Postfix(EnemyData __instance, ref string __result)
+    {
+        if (GiantBeeState.PhaseActive && __instance.enemyName == EEnemy.Bee)
+            __result = "BOMBUS";
+    }
+}
+
+
+// BOMBUS one-shot: temporarily set beeData.damage = 9999 only while DamagePlayer
+// is executing for the BOMBUS instance. Restored in postfix — no other mob affected.
+[HarmonyPatch(typeof(PlayerHealth), "DamagePlayer",
+    new System.Type[] { typeof(Enemy), typeof(Vector3), typeof(DcFlags) })]
+static class Patch_BOMBUS_OneShot
+{
+    static int  _origDamage;
+    static bool _boosted;
+
+    [HarmonyPrefix]
+    static void Prefix(PlayerHealth __instance, Enemy enemy)
+    {
+        if (__instance != null) GiantBeeState.PhInstance = __instance;
+        _boosted = false;
+        if (!GiantBeeState.IsBombus(enemy)) return;
+
+        var data = enemy.enemyData;
+        if (data == null) return;
+        _origDamage  = data.damage;
+        data.damage  = 9999;
+        _boosted     = true;
+    }
+
+    [HarmonyPostfix]
+    static void Postfix(Enemy enemy)
+    {
+        if (!_boosted) return;
+        var data = enemy?.enemyData;
+        if (data != null) data.damage = _origDamage;
+        _boosted = false;
+        GiantBeeState.OnHitPlayer(enemy); // reset scale timer on successful hit
+    }
+}
+
+[HarmonyPatch(typeof(MyTime), "Update")]
+static class Patch_MyTime_Update_GiantBee
+{
+    [HarmonyPostfix]
+    static void Postfix() => GiantBeeState.Tick();
+}
 
 
 
+// (removed Patch_BOMBUS_BlockSpawns — enemies now keep spawning during/after the
+//  BOMBUS phase; players wanted the overtime swarm/ghosts to continue.)
 
+// ─────────────────────────────────────────────────────────────────
+// BOMBUS — reset state on new stage so BOMBUS + warning re-arm
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(MyTime), "OnNewStageStarted")]
+static class Patch_BOMBUS_ResetOnNewStage
+{
+    [HarmonyPostfix]
+    static void Postfix() => GiantBeeState.Reset();
+}
+
+// ─────────────────────────────────────────────────────────────────
+// BOMBUS — drop a Corrupt chest when a BOMBUS instance dies
+// ─────────────────────────────────────────────────────────────────
+
+[HarmonyPatch(typeof(Enemy), "EnemyDied", new System.Type[] { typeof(DamageContainer) })]
+static class Patch_BOMBUS_Death
+{
+    [HarmonyPrefix]
+    static void Prefix(Enemy __instance) => GiantBeeState.OnBombusDied(__instance);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// BETTER JUMP ARC — bake the Flappy Feathers' forward jump boost into
+// the BASE jump (without the item's extra mid-air jumps).
+//
+// The feather's OnJumped does exactly: rb.velocity += speedBoost * moveDir
+// (decompiled at 0x180456C70). That forward arc is what made movement /
+// landings feel good — diagonal bunny-hopping stacks the boost per jump
+// to build speed, which players want. We replicate just that part here.
+//
+// Only applies when the player is actually inputting a direction, so a
+// standing jump still goes straight up.
+// ─────────────────────────────────────────────────────────────────
+[HarmonyPatch(typeof(PlayerMovement), "Jump")]
+static class Patch_BetterJumpArc
+{
+    const float ForwardBoost = 0.2f;   // per-jump forward velocity added in move direction
+
+    [HarmonyPostfix]
+    static void Postfix(PlayerMovement __instance)
+    {
+        try
+        {
+            var pm = __instance;
+            if (pm == null) return;
+            var rb = pm.GetComponent<Rigidbody>();
+            if (rb == null) return;
+            var ori = pm.orientation;
+            if (ori == null) return;
+
+            unsafe
+            {
+                float inputX = *(float*)(pm.Pointer + 0x118);
+                float inputY = *(float*)(pm.Pointer + 0x11C);
+                if (inputX == 0f && inputY == 0f) return;     // standing jump → straight up
+
+                Vector3 wish = ori.forward * inputY + ori.right * inputX;
+                wish.y = 0f;
+                if (wish.sqrMagnitude < 0.0001f) return;
+                wish.Normalize();
+
+                var v = rb.velocity;
+                v.x += wish.x * ForwardBoost;
+                v.z += wish.z * ForwardBoost;
+                rb.velocity = v;
+            }
+        }
+        catch { }
+    }
+}

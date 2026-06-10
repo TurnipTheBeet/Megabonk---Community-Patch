@@ -3,3 +3,4 @@ obj/
 thunderstore/BepInEx/plugins/
 *.user
 .vs/
+tools/index.json
