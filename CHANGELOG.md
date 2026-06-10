@@ -15,7 +15,7 @@
 - Rarity changes: Golden Shield moved Rare → Epic; Slurp Gloves moved Epic → Rare. Their baked rim colors are recolored to match (now correctly limited to the outer outline only).
 - Key: chest open chance per stack changed to 15% (from the previous 20%), tooltip updated to match.
 - Reorganized default hotkeys to run F1–F9 in the order they appear in the settings tab, skipping F10 (it opens the in-game console). All binds are still fully rebindable.
-- Mod menu polish: the "Restart Run / Reroll Map" button is now hidden when you're not in a run (it only does something mid-run).
+- Removed the "Restart Run / Reroll Map" button from the mod menu (redundant — the game already has a restart option).
 - Leaderboard moved to a dedicated VPS host (more reliable uptime); personal and global submission unchanged.
 
 ## 1.4.0

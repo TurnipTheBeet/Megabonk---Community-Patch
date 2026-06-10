@@ -319,20 +319,6 @@ public class ModGui : MonoBehaviour
         catch { }
     }
 
-    // Restart the active run, rerolling the map.
-    // MapController.RestartRun() reuses the current runConfig, resets the stage index,
-    // and reloads from the first stage. Calling it on the main menu hits a null-config
-    // trap, so guard with IsMainMenu().
-    internal static void TryRestartRun()
-    {
-        try
-        {
-            if (Assets.Scripts.Managers.MapController.IsMainMenu()) return;
-            Assets.Scripts.Managers.MapController.RestartRun();
-        }
-        catch (System.Exception e) { Plugin.Log.LogError($"[RestartRun] {e.Message}"); }
-    }
-
     private void ToggleDamageChart()
     {
         try
@@ -508,7 +494,6 @@ public class ModGui : MonoBehaviour
         winH += LineH + 4f; // fly speed row
         winH += LineH + 4f; // BOMBUS button
         winH += LineH + 4f; // +1 min / -1 min buttons
-        if (inGame) winH += LineH + 4f; // restart run row (in-game only)
         winH += LineH + 4f; // hitboxes toggle
         if (ShowHitboxes) winH += LineH + 4f; // hitbox distance slider
         winH += LineH + 8f;
@@ -589,14 +574,6 @@ public class ModGui : MonoBehaviour
         }
         GUI.enabled = true;
         y += LineH + 4f;
-
-        // Restart only makes sense mid-run — hide entirely on the main menu.
-        if (inGame)
-        {
-            if (GUI.Button(new Rect(lx, y, cw, LineH), "Restart Run / Reroll Map"))
-                TryRestartRun();
-            y += LineH + 4f;
-        }
 
         ShowHitboxes = GUI.Toggle(new Rect(lx, y, cw, LineH), ShowHitboxes,
             ShowHitboxes ? "Hitboxes: ON" : "Hitboxes: OFF", btnStyle);
