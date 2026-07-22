@@ -5,6 +5,7 @@ using HarmonyLib;
 namespace MegabonkCommunityPatch;
 
 /// <summary>
+/// Banishment Weight Redistribution:
 /// When all items in a rarity tier are banished, zero out that tier's weight
 /// so the probability mass is redistributed to remaining tiers proportionally.
 /// </summary>
