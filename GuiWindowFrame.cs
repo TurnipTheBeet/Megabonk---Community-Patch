@@ -1,28 +1,68 @@
+using BepInEx.Configuration;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
 // Shared draggable + uniform-resizeable frame for our IMGUI popup menus.
 //   • Default Scale = 2.0  → menus open at double their old size.
 //   • Drag the title bar to move; drag the bottom-right grip to resize.
+//   • Call .Persist("WindowId") to save/restore position + scale in config.
 // All hit-testing runs in raw screen space (call HandleInput from Update), so it
 // stays correct no matter what GUI.matrix the draw pass uses. Begin()/End() wrap
 // the draw in a ScaleAroundPivot so every Rect inside scales uniformly.
 internal class GuiWindowFrame
 {
-    public Vector2 Pivot;            // screen-space top-left of the window
-    public float   Scale = 2f;       // double size by default
+    public Vector2 Pivot;
+    public float   Scale = 2f;
     public float   MinScale = 1f;
     public float   MaxScale = 4f;
 
-    public const float Grip = 18f;   // screen-px resize grip square
+    public const float Grip = 24f;
 
     bool _dragging, _resizing;
     Vector2 _dragOff;
 
+    static ConfigFile _cfg;
+    ConfigEntry<float> _cX, _cY, _cScale;
+
+    internal static void SetConfig(ConfigFile cfg) => _cfg = cfg;
+
     public GuiWindowFrame(Vector2 pivot) { Pivot = pivot; }
 
-    // Raw-input drag/resize. winW/winH are the LOGICAL (unscaled) window size.
+    public GuiWindowFrame Persist(string id)
+    {
+        if (_cfg == null || string.IsNullOrEmpty(id)) return this;
+        _cX = _cfg.Bind("WindowLayout", id + ".X", Pivot.x, "Saved window X (screen px).");
+        _cY = _cfg.Bind("WindowLayout", id + ".Y", Pivot.y, "Saved window Y (screen px).");
+        _cScale = _cfg.Bind("WindowLayout", id + ".Scale", Scale, "Saved window scale.");
+        Pivot = new Vector2(_cX.Value, _cY.Value);
+        Scale = Mathf.Clamp(_cScale.Value, MinScale, MaxScale);
+        ClampOnScreen();
+        return this;
+    }
+
+    void ClampOnScreen()
+    {
+        if (Screen.width > 0)
+        {
+            Pivot.x = Mathf.Clamp(Pivot.x, 0f, Mathf.Max(0f, Screen.width - 60f));
+            Pivot.y = Mathf.Clamp(Pivot.y, 0f, Mathf.Max(0f, Screen.height - 40f));
+        }
+    }
+
+    void Save()
+    {
+        if (_cX != null)
+        {
+            _cX.Value = Pivot.x;
+            _cY.Value = Pivot.y;
+            _cScale.Value = Scale;
+        }
+    }
+
+    public bool Busy => _dragging || _resizing;
+
     public void HandleInput(float winW, float winH, float titleH)
     {
         float mx = Input.mousePosition.x;
@@ -40,17 +80,21 @@ internal class GuiWindowFrame
                 _dragOff  = mp - Pivot;
             }
         }
-        if (Input.GetMouseButtonUp(0)) { _dragging = false; _resizing = false; }
+        if (Input.GetMouseButtonUp(0) && (_dragging || _resizing))
+        {
+            _dragging = false; _resizing = false;
+            Save();
+        }
 
         if (_dragging && Input.GetMouseButton(0))
             Pivot = mp - _dragOff;
         if (_resizing && Input.GetMouseButton(0))
-            Scale = Mathf.Clamp((mx - Pivot.x) / Mathf.Max(1f, winW), MinScale, MaxScale);
+        {
+            float newW = mx - Pivot.x;
+            Scale = Mathf.Clamp(newW / Mathf.Max(1f, winW), MinScale, MaxScale);
+        }
     }
 
-    public bool Busy => _dragging || _resizing;
-
-    // Wrap drawing: returns the previous matrix; pass it back to End().
     public Matrix4x4 Begin()
     {
         var old = GUI.matrix;
@@ -60,11 +104,29 @@ internal class GuiWindowFrame
 
     public void End(Matrix4x4 old) => GUI.matrix = old;
 
-    // Draw the grip in raw screen space — call AFTER End() so it lines up exactly
-    // with the screen-space hit area used by HandleInput.
     public void DrawGrip(float winW, float winH)
     {
         float sw = winW * Scale, sh = winH * Scale;
-        GUI.Box(new Rect(Pivot.x + sw - Grip, Pivot.y + sh - Grip, Grip, Grip), "↘");
+        float gx = Pivot.x + sw;
+        float gy = Pivot.y + sh;
+        
+        Color oldColor = GUI.color;
+        GUI.color = new Color(0.5f, 0.5f, 0.5f, 0.8f);
+        
+        // Draw three crisp diagonal 45-degree lines cutting the bottom-right corner
+        for (int i = 0; i <= 16; i++)
+        {
+            GUI.DrawTexture(new Rect(gx - 16 + i, gy - i, 1.5f, 1.5f), Texture2D.whiteTexture);
+        }
+        for (int i = 0; i <= 11; i++)
+        {
+            GUI.DrawTexture(new Rect(gx - 11 + i, gy - i, 1.5f, 1.5f), Texture2D.whiteTexture);
+        }
+        for (int i = 0; i <= 6; i++)
+        {
+            GUI.DrawTexture(new Rect(gx - 6 + i, gy - i, 1.5f, 1.5f), Texture2D.whiteTexture);
+        }
+        
+        GUI.color = oldColor;
     }
 }

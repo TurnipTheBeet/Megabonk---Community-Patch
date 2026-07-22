@@ -1,8 +1,10 @@
+using System.Collections.Generic;
 using UnityEngine;
+using Object = UnityEngine.Object;
 using TMPro;
 using Assets.Scripts.Inventory__Items__Pickups.Pickups;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
 public class ModGui : MonoBehaviour
 {
@@ -23,6 +25,8 @@ public class ModGui : MonoBehaviour
     internal static System.Collections.Generic.List<string> UnauthorizedMods = new();
     internal static bool CheatsUsed;
     internal static bool  ShowHitboxes    = false;
+    internal static bool  ModMenuEnabled   = true; // toggled OFF by default in config; enable under Settings
+    internal static bool  SuppressMovementInput;
     internal static float BombusAnnounceTime = -999f; // Time.time when BOMBUS spawned
     private Material  _hitboxMat;
     private Collider[] _cachedColliders;
@@ -41,9 +45,12 @@ public class ModGui : MonoBehaviour
     private bool    _origRtCaptured;
 
     private readonly GuiWindowFrame _frame = new(new Vector2(20f, 20f));
-    private float _lastWinH = 480f;   // last drawn logical height (for resize hit-test)
+    private readonly GuiWindowFrame _noticeFrame = new(new Vector2(700f, 8f));
+    private float _lastWinH = 480f;
+    private float _lastNoticeH = 36f;
 
     private bool _powerupOpen  = true;
+    private bool _guiInit;
     internal static bool  GodMode      = false;
     internal static bool  FlyMode      = false;
     internal static float FlySpeed     = 20f;
@@ -57,6 +64,13 @@ public class ModGui : MonoBehaviour
     private const float PadX  = 8f;
     private const float LineH = 22f;
 
+    private int _versionPatchFrames;
+    private int _reevalFrame;
+
+    private void Start()
+    {
+    }
+
     private void Update()
     {
         while (MainThread.TryDequeue(out var action))
@@ -65,7 +79,7 @@ public class ModGui : MonoBehaviour
         NativeSettings.TickCapture();
         NativeSettings.PollKeycapCapture();
 
-        if (NeedVersionPatch)
+        if (NeedVersionPatch && _versionPatchFrames++ >= 2)
         {
             string gameVer = UnityEngine.Application.version;
             var all = UnityEngine.Object.FindObjectsOfType<TMPro.TextMeshProUGUI>();
@@ -82,7 +96,16 @@ public class ModGui : MonoBehaviour
             }
         }
 
-        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.ModMenu.Value))
+        // Reevaluate auto-conditions only every 15 frames, not every frame
+        if (++_reevalFrame >= 15)
+        {
+            _reevalFrame = 0;
+            PatchModules.ReevaluateAll();
+        }
+
+        ModMenuEnabled = Hotkeys.ModMenuEnabled.Value;
+
+        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.ModMenu.Value) && ModMenuEnabled)
         {
             if (_authenticated)
             {
@@ -97,6 +120,9 @@ public class ModGui : MonoBehaviour
 
         if (_promptVisible && !_authenticated)
         {
+            SuppressMovementInput = true;
+            // Mute game keyboard input while password prompt is open
+            Input.ResetInputAxes();
             foreach (char c in Input.inputString)
             {
                 if (c == '\b')
@@ -122,6 +148,10 @@ public class ModGui : MonoBehaviour
                     _passwordInput += c;
                 }
             }
+        }
+        else
+        {
+            SuppressMovementInput = false;
         }
 
         if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.DamageChart.Value) && !ChartDisabled)
@@ -177,6 +207,12 @@ public class ModGui : MonoBehaviour
 
         if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.AutoUpgradeLog.Value))
             AutoLevelPick.ToggleWindow();
+
+        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.PowerupTracker.Value))
+            PowerupTracker.Toggle();
+
+        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.ChestOddsTracker.Value))
+            ChestOddsTracker.Toggle();
 
         MapScanner.Tick();
         SkipChestSync.Tick();
@@ -253,6 +289,8 @@ public class ModGui : MonoBehaviour
         catch { }
 
         // Drag / resize the open menus (raw-input hit-testing, matrix-independent).
+        if (UpdateAvailable || UnauthorizedMods.Count > 0 || (CheatsUsed && Assets.Scripts.Managers.EnemyManager.Instance != null))
+            _noticeFrame.HandleInput(520f, _lastNoticeH, 18f);
         if (_visible)
             _frame.HandleInput(WinW, _lastWinH, LineH + 4f);
         if (ChaosMenu.Visible)
@@ -261,6 +299,19 @@ public class ModGui : MonoBehaviour
             MapScanner.HandleInput();
         if (AutoLevelPick.Visible)
             AutoLevelPick.HandleInput();
+        if (PowerupTracker.Visible)
+            PowerupTracker.HandleInput();
+        if (ChestOddsTracker.Visible)
+            ChestOddsTracker.HandleInput();
+
+        // Leaderboard tooltip hover detection
+        try
+        {
+            var lbUi = LeaderboardInjector.LbUi;
+            if (lbUi != null)
+                LeaderboardTooltip.CheckHover(lbUi, Patch_LBTypeSelected.CurrentTab);
+        }
+        catch { }
     }
 
     internal void ResetChartCache()
@@ -427,40 +478,55 @@ public class ModGui : MonoBehaviour
 
     private void OnGUI()
     {
+        // Warm up IMGUI and register windows on the very first frame,
+        // not on the frame the user presses F1. This prevents the
+        // first-menu-open hitch.
+        if (!_guiInit)
+        {
+            _noticeFrame.Persist("Notices");
+            _frame.Persist("ModMenu");
+            _guiInit = true;
+
+            // Pre-warm IL2CPP generic instantiation for dictionary iteration
+            try
+            {
+                var dummyFx = new System.Collections.Generic.Dictionary<Assets.Scripts.Inventory__Items__Pickups.Stats.EStatusEffect, Assets.Scripts.Inventory__Items__Pickups.Stats.StatusEffect>();
+                foreach (var kv in dummyFx) System.GC.KeepAlive(kv);
+            }
+            catch { }
+        }
+
         ChaosMenu.Draw();
         MapScanner.Draw();
         AutoLevelPick.Draw();
+        PowerupTracker.Draw();
+        ChestOddsTracker.Draw();
         Toast.Draw();
 
-        if (UpdateAvailable)
+        if (UpdateAvailable || UnauthorizedMods.Count > 0 || (CheatsUsed && Assets.Scripts.Managers.EnemyManager.Instance != null))
         {
-            float bw = 420f, bh = 36f;
-            float bx = (Screen.width - bw) / 2f;
-            float by = 8f;
-            GUI.Box(new Rect(bx, by, bw, bh), "");
-            GUI.Label(new Rect(bx + 8f, by + 8f, bw - 16f, 20f),
-                "!! MegaBonk Mod is outdated — please update to the latest version !!");
-        }
+            var savedNoticeMatrix = _noticeFrame.Begin();
+            float nx = _noticeFrame.Pivot.x;
+            float ny = _noticeFrame.Pivot.y;
+            float nw = 520f;
 
-        if (UnauthorizedMods.Count > 0)
-        {
-            float bw = 520f, bh = 36f;
-            float bx = (Screen.width - bw) / 2f;
-            float by = 48f;
-            GUI.Box(new Rect(bx, by, bw, bh), "");
-            string names = string.Join(", ", UnauthorizedMods);
-            GUI.Label(new Rect(bx + 8f, by + 8f, bw - 16f, 20f),
-                $"!! Other mods detected — leaderboard disabled: {names}");
-        }
+            var lines = new System.Collections.Generic.List<string>();
+            if (UpdateAvailable)
+                lines.Add("!! MegaBonk Mod is outdated \u2014 please update to the latest version !!");
+            if (UnauthorizedMods.Count > 0)
+                lines.Add("!! Other mods detected \u2014 leaderboard disabled: " + string.Join(", ", UnauthorizedMods));
+            if (CheatsUsed && Assets.Scripts.Managers.EnemyManager.Instance != null)
+                lines.Add("!! Mod menu used \u2014 leaderboard disabled for this run");
 
-        if (CheatsUsed && Assets.Scripts.Managers.EnemyManager.Instance != null)
-        {
-            float bw = 520f, bh = 36f;
-            float bx = (Screen.width - bw) / 2f;
-            float by = UnauthorizedMods.Count > 0 ? 88f : 48f;
-            GUI.Box(new Rect(bx, by, bw, bh), "");
-            GUI.Label(new Rect(bx + 8f, by + 8f, bw - 16f, 20f),
-                "!! Mod menu used — leaderboard disabled for this run");
+            float nh = 24f * lines.Count + 4f;
+        UiTheme.Backdrop(new Rect(nx, ny, nw, nh), "Notices");
+            GUI.Box(new Rect(nx, ny, nw, nh), "Notices");
+            for (int i = 0; i < lines.Count; i++)
+                GUI.Label(new Rect(nx + 8f, ny + 20f + i * 24f, nw - 16f, 20f), lines[i]);
+
+            _lastNoticeH = nh;
+            _noticeFrame.End(savedNoticeMatrix);
+            _noticeFrame.DrawGrip(nw, nh);
         }
 
         if (_promptVisible && !_authenticated)
@@ -475,6 +541,9 @@ public class ModGui : MonoBehaviour
         }
 
         if (!_visible) return;
+
+        // Leaderboard tooltip (independent of mod menu visibility)
+        try { LeaderboardTooltip.OnGUI(); } catch { }
 
         var savedMatrix = _frame.Begin();
         float wx = _frame.Pivot.x;
@@ -498,7 +567,7 @@ public class ModGui : MonoBehaviour
         if (ShowHitboxes) winH += LineH + 4f; // hitbox distance slider
         winH += LineH + 8f;
 
-        UiTheme.Backdrop(new Rect(wx, wy, WinW, winH));
+        UiTheme.Backdrop(new Rect(wx, wy, WinW, winH), "ModMenu");
         GUI.Box(new Rect(wx, wy, WinW, winH), "MegaBonk Mod");
 
         float y = wy + LineH + 6f;
@@ -575,6 +644,30 @@ public class ModGui : MonoBehaviour
         GUI.enabled = true;
         y += LineH + 4f;
 
+        GUI.enabled = inGame;
+        if (GUI.Button(new Rect(lx, y, cw, LineH), "Give 1 of Every Item"))
+        {
+            try
+            {
+                var inv = GameManager.Instance?.GetPlayerInventory();
+                var dm = DataManager.Instance;
+                if (inv?.itemInventory != null && dm?.unsortedItems != null)
+                {
+                    foreach (var id in dm.unsortedItems)
+                    {
+                        if (id != null)
+                        {
+                            try { inv.itemInventory.AddItem(id.eItem); } catch { }
+                        }
+                    }
+                    CheatsUsed = true;
+                }
+            }
+            catch { }
+        }
+        GUI.enabled = true;
+        y += LineH + 4f;
+
         ShowHitboxes = GUI.Toggle(new Rect(lx, y, cw, LineH), ShowHitboxes,
             ShowHitboxes ? "Hitboxes: ON" : "Hitboxes: OFF", btnStyle);
         y += LineH + 4f;
@@ -592,6 +685,10 @@ public class ModGui : MonoBehaviour
         _lastWinH = winH;
         _frame.End(savedMatrix);
         _frame.DrawGrip(WinW, winH);
+    }
+
+    internal static void ResetVersionScan()
+    {
     }
 
     private void OnRenderObject()

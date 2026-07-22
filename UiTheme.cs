@@ -1,45 +1,52 @@
+using System.Collections.Generic;
 using BepInEx.Configuration;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-// Shared look for the mod's IMGUI windows. Draws a solid dark backdrop behind
-// each window so text stays readable over the game world. Opacity is configurable
-// (UI/MenuOpacity) and adjustable live from the F1 menu.
 internal static class UiTheme
 {
-    static ConfigEntry<float> _opacity;
-    static Texture2D          _tex;
+	private static Dictionary<string, ConfigEntry<float>> _opacities = new();
+	private static Texture2D _tex;
 
-    internal static float Opacity
-    {
-        get => _opacity != null ? _opacity.Value : 0.85f;
-        set { if (_opacity != null) _opacity.Value = Mathf.Clamp(value, 0.2f, 1f); }
-    }
+	internal static void Init(ConfigFile cfg)
+	{
+		_opacities["ModMenu"] = cfg.Bind<float>("UI", "ModMenuOpacity", 0.85f, "Background opacity of the F1 mod menu window.");
+		_opacities["ChaosMenu"] = cfg.Bind<float>("UI", "ChaosMenuOpacity", 0.85f, "Background opacity of the Chaos/Shrine stat menu.");
+		_opacities["MapScanner"] = cfg.Bind<float>("UI", "MapScannerOpacity", 0.85f, "Background opacity of the Map Scanner window.");
+		_opacities["AutoUpgrade"] = cfg.Bind<float>("UI", "AutoUpgradeOpacity", 0.85f, "Background opacity of the Auto-Upgrade log window.");
+		_opacities["PowerupTracker"] = cfg.Bind<float>("UI", "PowerupTrackerOpacity", 0.5f, "Background opacity of the Powerup Tracker overlay.");
+		_opacities["ChestOdds"] = cfg.Bind<float>("UI", "ChestOddsOpacity", 0.5f, "Background opacity of the Chest Odds overlay.");
+		_opacities["Notices"] = cfg.Bind<float>("UI", "NoticesOpacity", 0.85f, "Background opacity of the notices banner.");
+		_opacities["Tooltip"] = cfg.Bind<float>("UI", "TooltipOpacity", 0.94f, "Background opacity of the leaderboard tooltip.");
+	}
 
-    internal static void Init(ConfigFile cfg)
-    {
-        _opacity = cfg.Bind("UI", "MenuOpacity", 0.85f,
-            "Background opacity of the mod's custom windows (0.2 = see-through, 1.0 = solid). Also adjustable live in the F1 menu.");
-    }
+	internal static float GetOpacity(string key) =>
+		_opacities.TryGetValue(key, out var entry) ? entry.Value : 0.85f;
 
-    static Texture2D Tex()
-    {
-        if (_tex == null)
-        {
-            _tex = new Texture2D(1, 1) { hideFlags = HideFlags.HideAndDontSave };
-            _tex.SetPixel(0, 0, Color.white);
-            _tex.Apply();
-        }
-        return _tex;
-    }
+	internal static void SetOpacity(string key, float value)
+	{
+		if (_opacities.TryGetValue(key, out var entry))
+			entry.Value = Mathf.Clamp(value, 0f, 1f);
+	}
 
-    // Fill a window rect with an opaque dark backing before the GUI.Box is drawn.
-    internal static void Backdrop(Rect r)
-    {
-        var prev = GUI.color;
-        GUI.color = new Color(0.07f, 0.07f, 0.11f, Opacity);
-        GUI.DrawTexture(r, Tex());
-        GUI.color = prev;
-    }
+	private static Texture2D Tex()
+	{
+		if ((Object)_tex == null)
+		{
+			_tex = new Texture2D(1, 1) { hideFlags = (HideFlags)61 };
+			_tex.SetPixel(0, 0, Color.white);
+			_tex.Apply();
+		}
+		return _tex;
+	}
+
+	internal static void Backdrop(Rect r, string key)
+	{
+		Color color = GUI.color;
+		GUI.color = new Color(0.07f, 0.07f, 0.11f, GetOpacity(key));
+		GUI.DrawTexture(r, (Texture)Tex());
+		GUI.color = color;
+	}
 }

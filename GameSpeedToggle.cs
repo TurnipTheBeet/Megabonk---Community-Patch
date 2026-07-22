@@ -1,11 +1,11 @@
 #nullable disable
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-// Toggles game speed between 1x and 2x by scaling Time.timeScale. Counts as a
-// cheat (inflates kills/time per real second), so flips CheatsUsed → leaderboard
-// submissions are blocked, same as God Mode / Instakill / spawn cheats.
+// Toggles game speed between 1x and 2x by scaling Time.timeScale. QoL feature —
+// does not block leaderboard submissions.
 //
 // We only override timeScale when the game is actually running (timeScale > 0).
 // While paused the game holds timeScale at 0; we leave that alone and re-apply
@@ -21,7 +21,6 @@ internal static class GameSpeedToggle
         Fast = !Fast;
         if (Fast)
         {
-            ModGui.CheatsUsed = true;
             if (Time.timeScale > 0f) Time.timeScale = FastMult;
             Toast.Show("Game Speed: 2x", Color.cyan);
         }

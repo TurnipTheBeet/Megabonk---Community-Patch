@@ -1,41 +1,49 @@
-#nullable disable
+using System;
+using Assets.Scripts.Saves___Serialization.SaveFiles.Configs.ConfigSettingsTypes;
+using BepInEx.Core.Logging.Interpolation;
+using BepInEx.Logging;
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-// Toggles the game's "Effects" opacity slider (Settings > Effects, backed by
-// CFVisualsSettings.particle_opacity, a 0–1 alpha multiplier) between 0% and
-// 100%. Writes the live setting, fires the game's settings-changed event so
-// every ParticleOpacity component refreshes immediately, then persists it.
 internal static class EffectsOpacityToggle
 {
-    const string SettingName = "particle_opacity";
+	private const string SettingName = "particle_opacity";
 
-    internal static void Toggle()
-    {
-        try
-        {
-            var sm = SaveManager.Instance;
-            var vis = sm != null && sm.config != null ? sm.config.cfVisualsSettings : null;
-            if (vis == null) { Toast.Show("Effects opacity: settings not loaded", Color.yellow); return; }
-
-            float cur  = vis.particle_opacity;
-            float next = cur > 0.5f ? 0f : 1f;
-            vis.particle_opacity = next;
-
-            // Tell the game a setting changed → ParticleOpacity components re-read
-            // the value and refresh. Subscribers ignore the value args for any name
-            // that isn't theirs, so null payloads are safe.
-            CurrentSettings.A_SettingUpdated?.Invoke(SettingName, null, null);
-
-            sm.SaveConfig();
-
-            Toast.Show($"Effects opacity: {(next > 0.5f ? "100%" : "0%")}",
-                       next > 0.5f ? Color.green : Color.gray);
-        }
-        catch (System.Exception e)
-        {
-            Plugin.Log.LogWarning($"[EffectsOpacityToggle] {e.Message}");
-        }
-    }
+	internal static void Toggle()
+	{
+		//IL_00df: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00e6: Expected O, but got Unknown
+		//IL_0038: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00bd: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00b6: Unknown result type (might be due to invalid IL or missing references)
+		try
+		{
+			SaveManager instance = SaveManager.Instance;
+			CFVisualsSettings val = (((UnityEngine.Object)(object)instance != (UnityEngine.Object)null && instance.config != null) ? instance.config.cfVisualsSettings : null);
+			if (val == null)
+			{
+				Toast.Show("Effects opacity: settings not loaded", Color.yellow);
+				return;
+			}
+			float particle_opacity = val.particle_opacity;
+			float num2 = (val.particle_opacity = ((particle_opacity > 0.5f) ? 0f : 1f));
+			CurrentSettings.A_SettingUpdated?.Invoke("particle_opacity", (UnityEngine.Object)null, (UnityEngine.Object)null);
+			instance.SaveConfig();
+			Toast.Show("Effects opacity: " + ((num2 > 0.5f) ? "100%" : "0%"), (num2 > 0.5f) ? Color.green : Color.gray);
+		}
+		catch (Exception ex)
+		{
+			ManualLogSource log = Plugin.Log;
+			bool flag = default(bool);
+			BepInExWarningLogInterpolatedStringHandler val2 = new BepInExWarningLogInterpolatedStringHandler(23, 1, out flag);
+			if (flag)
+			{
+				((BepInExLogInterpolatedStringHandler)val2).AppendLiteral("[EffectsOpacityToggle] ");
+				((BepInExLogInterpolatedStringHandler)val2).AppendFormatted<string>(ex.Message);
+			}
+			log.LogWarning(val2);
+		}
+	}
 }

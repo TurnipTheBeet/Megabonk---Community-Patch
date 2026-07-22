@@ -1,40 +1,59 @@
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-// Shared transient on-screen notification for hotkey toggles that have no window
-// of their own (Smart Skip Chest, Smart Targeting, …). Resolution-aware so it
-// stays readable on 4K / high-DPI displays instead of a tiny fixed-pixel box.
 internal static class Toast
 {
-    static string _msg;
-    static Color  _col = Color.white;
-    static float  _until;
+	private static string _msg;
 
-    internal static void Show(string msg, Color col, float seconds = 2.5f)
-    {
-        _msg = msg; _col = col; _until = Time.unscaledTime + seconds;
-    }
+	private static Color _col = Color.white;
 
-    internal static void Draw()
-    {
-        if (_msg == null || Time.unscaledTime > _until) return;
+	private static float _until;
 
-        // scale everything off a 1080p baseline; never shrink below 1x
-        float scale = Mathf.Max(1f, Screen.height / 1080f);
-        float w = 320f * scale;
-        float h = 46f  * scale;
-        float x = (Screen.width - w) / 2f;
-        float y = Screen.height * 0.16f;
+	private static GUIStyle _style;
 
-        // GUIStyle.fontSize is a plain int (safe). Avoid TextAnchor / FontStyle —
-        // those enums live in assemblies this csproj doesn't reference (CS0012).
-        // GUI.Box already centers its text, so cloning skin.box is enough.
-        var style = new GUIStyle(GUI.skin.box) { fontSize = Mathf.RoundToInt(20f * scale) };
+	private static int _styleFontSize;
 
-        var prev = GUI.color;
-        GUI.color = _col;
-        GUI.Box(new Rect(x, y, w, h), _msg, style);
-        GUI.color = prev;
-    }
+	internal static void Show(string msg, Color col, float seconds = 2.5f)
+	{
+		//IL_0007: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0008: Unknown result type (might be due to invalid IL or missing references)
+		_msg = msg;
+		_col = col;
+		_until = Time.unscaledTime + seconds;
+	}
+
+	internal static void Draw()
+	{
+		//IL_00b6: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00bb: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00bd: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00cd: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00e2: Unknown result type (might be due to invalid IL or missing references)
+		//IL_009b: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00a0: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00ae: Expected O, but got Unknown
+		if (_msg != null && !(Time.unscaledTime > _until))
+		{
+			float num = Mathf.Max(1f, (float)Screen.height / 1080f);
+			float num2 = 320f * num;
+			float num3 = 46f * num;
+			float num4 = ((float)Screen.width - num2) / 2f;
+			float num5 = (float)Screen.height * 0.16f;
+			int num6 = Mathf.RoundToInt(20f * num);
+			if (_style == null || _styleFontSize != num6)
+			{
+				_style = new GUIStyle(GUI.skin.box)
+				{
+					fontSize = num6
+				};
+				_styleFontSize = num6;
+			}
+			Color color = GUI.color;
+			GUI.color = _col;
+			GUI.Box(new Rect(num4, num5, num2, num3), _msg, _style);
+			GUI.color = color;
+		}
+	}
 }

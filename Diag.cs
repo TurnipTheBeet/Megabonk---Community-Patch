@@ -1,6 +1,7 @@
 using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
 // ─────────────────────────────────────────────────────────────────────────
 // DIAGNOSTIC: capture full managed stack traces for Unity errors/exceptions.

@@ -1,0 +1,9 @@
+{
+  "name": "MegabonkCommunityPatch",
+  "version": "1.4.6",
+  "description": "Community patch: leaderboard, rebindable hotkeys, item caps/balance, rarity reworks, map scanner, auto-upgrade, priority targeting, fast fall, game speed, and more.",
+  "authors": ["Your Name"],
+  "dependencies": {
+    "BepInEx.Unity.IL2CPP": "6.0.0-be.755"
+  }
+}

@@ -1,134 +1,203 @@
+using System.Collections.Generic;
+using Assets.Scripts.Inventory__Items__Pickups.Upgrades;
+using Assets.Scripts.Menu.Shop;
 using BepInEx.Configuration;
 using UnityEngine;
-using Assets.Scripts.Menu.Shop;                         // EStat
-using Assets.Scripts.Inventory__Items__Pickups.Upgrades; // EncounterUtility
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-// ─────────────────────────────────────────────────────────────────────────
-// CHAOS STAT MENU  (hotkey: Hotkeys.ChaosMenu, default F3)
-//
-// The mod blacklists 7 "junk" stats from the Chaos Tome / Gamble pool
-// (Plugin.BlacklistedStats). This little window lets the player re-enable any
-// of them per taste. Choices persist via the BepInEx config and re-apply each
-// run; toggling mid-run updates the live pool immediately.
-//
-// Deliberately separate from the password-gated ModGui cheat menu and from the
-// native settings tab — this is just pool curation, not a cheat.
-// ─────────────────────────────────────────────────────────────────────────
 internal static class ChaosMenu
 {
-    // The toggleable stats. `def` = default allowed-in-pool state:
-    //   false → junk stat, blacklisted by default, toggle ON to re-enable
-    //   true  → useful stat, in pool by default, toggle OFF to remove
-    static readonly (int id, string name, bool def)[] Stats =
-    {
-        (1,  "Health Regen",     false),
-        (2,  "Shield",           false),
-        (3,  "Thorns",           false),
-        (4,  "Armor",            false),
-        (5,  "Evasion",          false),
-        (11, "Projectile Speed", false),
-        (24, "Knockback",        false),
-        (10, "Duration",         true),
-        (25, "Movement Speed",   true),
-    };
+	private static readonly (int id, string name, bool def)[] Stats = new(int, string, bool)[10]
+	{
+		(1, "Health Regen", false),
+		(2, "Shield", false),
+		(3, "Thorns", false),
+		(4, "Armor", false),
+		(5, "Evasion", false),
+		(11, "Projectile Speed", false),
+		(24, "Knockback", false),
+		(29, "Pickup Range", false),
+		(10, "Duration", true),
+		(25, "Movement Speed", true)
+	};
 
-    static ConfigEntry<bool>[] _allow;   // parallel to Stats; true = allowed in pool
-    static ConfigFile _cfg;              // kept so toggles can be force-saved
-    internal static bool Visible;
+	private static ConfigEntry<bool>[] _allow;
 
-    // Window geometry
-    const float WinW = 260f, PadX = 12f, LineH = 24f;
-    static readonly GuiWindowFrame _frame = new(new Vector2(40f, 120f));  // double size by default
-    static float _lastWinH;
+	private static ConfigFile _cfg;
 
-    static float WinHeight() =>
-        LineH + 8f + LineH /*hint*/ + Stats.Length * (LineH + 2f) + 8f;
+	internal static bool Visible;
 
-    // Raw-input drag/resize, driven from ModGui.Update while the menu is open.
-    internal static void HandleInput() =>
-        _frame.HandleInput(WinW, _lastWinH > 0f ? _lastWinH : WinHeight(), LineH + 4f);
+	private const float WinW = 260f;
 
-    internal static void Init(ConfigFile cfg)
-    {
-        _cfg = cfg;
-        _allow = new ConfigEntry<bool>[Stats.Length];
-        for (int i = 0; i < Stats.Length; i++)
-        {
-            _allow[i] = cfg.Bind("ChaosStats", Stats[i].name, Stats[i].def,
-                $"Allow '{Stats[i].name}' to appear in the Chaos Tome / Gamble pool.");
-        }
-        ApplyAllToBlacklist();   // sync config → Plugin.BlacklistedStats at startup
-    }
+	private const float PadX = 12f;
 
-    // Rebuild Plugin.BlacklistedStats from the saved config (run-time pool is
-    // re-applied per run by Patch_RunUnlockables_Init using this set).
-    static void ApplyAllToBlacklist()
-    {
-        for (int i = 0; i < Stats.Length; i++)
-        {
-            if (_allow[i].Value) Plugin.BlacklistedStats.Remove(Stats[i].id);
-            else                 Plugin.BlacklistedStats.Add(Stats[i].id);
-        }
-    }
+	private const float LineH = 24f;
 
-    internal static void Toggle() => Visible = !Visible;
+	private static readonly GuiWindowFrame _frame = new GuiWindowFrame(new Vector2(40f, 120f)).Persist("ChaosMenu");
 
-    static void SetAllowed(int idx, bool allowed)
-    {
-        if (_allow[idx].Value == allowed) return;
-        _allow[idx].Value = allowed;
-        try { _cfg?.Save(); } catch { }   // force-persist so toggle survives restart
+	private static float _lastWinH;
 
-        int id = Stats[idx].id;
-        if (allowed) Plugin.BlacklistedStats.Remove(id);
-        else         Plugin.BlacklistedStats.Add(id);
+	private static float WinHeight()
+	{
+		return 56f + (float)Stats.Length * 26f + 8f;
+	}
 
-        // Update the live pool so the change takes effect this run too.
-        try
-        {
-            var pool = EncounterUtility.upgradableStatsChaosAndGamble;
-            if (pool != null)
-            {
-                var e = (EStat)id;
-                if (allowed) { if (!pool.Contains(e)) pool.Add(e); }
-                else         { if (pool.Contains(e))  pool.Remove(e); }
-            }
-        }
-        catch { }
-    }
+	internal static void HandleInput()
+	{
+		_frame.HandleInput(260f, (_lastWinH > 0f) ? _lastWinH : WinHeight(), 28f);
+	}
 
-    internal static void Draw()
-    {
-        if (!Visible) return;
+	internal static void Init(ConfigFile cfg)
+	{
+		_cfg = cfg;
+		_allow = new ConfigEntry<bool>[Stats.Length];
+		for (int i = 0; i < Stats.Length; i++)
+		{
+			_allow[i] = cfg.Bind<bool>("ChaosStats", Stats[i].name, Stats[i].def, "Allow '" + Stats[i].name + "' to appear in the Chaos Tome / Gamble / Shrine pool.");
+		}
+		ApplyAllToBlacklist();
+	}
 
-        float winH = WinHeight();
-        _lastWinH = winH;
+	private static void ApplyAllToBlacklist()
+	{
+		for (int i = 0; i < Stats.Length; i++)
+		{
+			if (_allow[i].Value)
+			{
+				Plugin.BlacklistedStats.Remove(Stats[i].id);
+				Plugin.BlacklistedShrineStats.Remove(Stats[i].id);
+			}
+			else
+			{
+				Plugin.BlacklistedStats.Add(Stats[i].id);
+				Plugin.BlacklistedShrineStats.Add(Stats[i].id);
+			}
+		}
+	}
 
-        var saved = _frame.Begin();
-        float ox = _frame.Pivot.x, oy = _frame.Pivot.y;
-        UiTheme.Backdrop(new Rect(ox, oy, WinW, winH));
-        GUI.Box(new Rect(ox, oy, WinW, winH), "Chaos Tome Stats");
+	internal static void Toggle()
+	{
+		Visible = !Visible;
+	}
 
-        float cw = WinW - PadX * 2f;
-        float lx = ox + PadX;
-        float y  = oy + LineH + 2f;
+	private static void SetAllowed(int idx, bool allowed)
+	{
+		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00ae: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0090: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00bc: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
+		if (_allow[idx].Value == allowed)
+		{
+			return;
+		}
+		_allow[idx].Value = allowed;
+		try
+		{
+			ConfigFile cfg = _cfg;
+			if (cfg != null)
+			{
+				cfg.Save();
+			}
+		}
+		catch
+		{
+		}
+		int item = Stats[idx].id;
+		if (allowed)
+		{
+			Plugin.BlacklistedStats.Remove(item);
+			Plugin.BlacklistedShrineStats.Remove(item);
+		}
+		else
+		{
+			Plugin.BlacklistedStats.Add(item);
+			Plugin.BlacklistedShrineStats.Add(item);
+		}
+		try
+		{
+			var upgradableStatsChaosAndGamble = EncounterUtility.upgradableStatsChaosAndGamble;
+			if (upgradableStatsChaosAndGamble != null)
+			{
+				EStat val = (EStat)item;
+				if (allowed)
+				{
+					if (!upgradableStatsChaosAndGamble.Contains(val))
+					{
+						upgradableStatsChaosAndGamble.Add(val);
+					}
+				}
+				else if (upgradableStatsChaosAndGamble.Contains(val))
+				{
+					upgradableStatsChaosAndGamble.Remove(val);
+				}
+			}
+		}
+		catch
+		{
+		}
+		try
+		{
+			var upgradableStatsShrines = EncounterUtility.upgradableStatsShrines;
+			if (upgradableStatsShrines != null)
+			{
+				EStat val = (EStat)item;
+				if (allowed)
+				{
+					if (!upgradableStatsShrines.Contains(val))
+					{
+						upgradableStatsShrines.Add(val);
+					}
+				}
+				else if (upgradableStatsShrines.Contains(val))
+				{
+					upgradableStatsShrines.Remove(val);
+				}
+			}
+		}
+		catch
+		{
+		}
+	}
 
-        GUI.Label(new Rect(lx, y, cw, LineH), "Toggle stats in the Chaos/Gamble pool:");
-        y += LineH;
-
-        var toggle = GUI.skin.button;
-        for (int i = 0; i < Stats.Length; i++)
-        {
-            bool cur = _allow[i].Value;
-            bool nv = GUI.Toggle(new Rect(lx, y, cw, LineH), cur,
-                (cur ? "ON   " : "OFF  ") + Stats[i].name, toggle);
-            if (nv != cur) SetAllowed(i, nv);
-            y += LineH + 2f;
-        }
-
-        _frame.End(saved);
-        _frame.DrawGrip(WinW, winH);
-    }
+	internal static void Draw()
+	{
+		//IL_0025: Unknown result type (might be due to invalid IL or missing references)
+		//IL_002a: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0066: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00a0: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00e6: Unknown result type (might be due to invalid IL or missing references)
+		//IL_015f: Unknown result type (might be due to invalid IL or missing references)
+		if (!Visible)
+		{
+			return;
+		}
+		float num = (_lastWinH = WinHeight());
+		Matrix4x4 old = _frame.Begin();
+		float x = _frame.Pivot.x;
+		float y = _frame.Pivot.y;
+		UiTheme.Backdrop(new Rect(x, y, 260f, num), "ChaosMenu");
+		GUI.Box(new Rect(x, y, 260f, num), "Chaos Tome / Shrine Stats");
+		float num2 = 236f;
+		float num3 = x + 12f;
+		float num4 = y + 24f + 2f;
+		GUI.Label(new Rect(num3, num4, num2, 24f), "Toggle stats in Chaos/Gamble/Shrines:");
+		num4 += 24f;
+		GUIStyle button = GUI.skin.button;
+		for (int i = 0; i < Stats.Length; i++)
+		{
+			bool value = _allow[i].Value;
+			bool flag = GUI.Toggle(new Rect(num3, num4, num2, 24f), value, (value ? "ON   " : "OFF  ") + Stats[i].name, button);
+			if (flag != value)
+			{
+				SetAllowed(i, flag);
+			}
+			num4 += 26f;
+		}
+		_frame.End(old);
+		_frame.DrawGrip(260f, num);
+	}
 }

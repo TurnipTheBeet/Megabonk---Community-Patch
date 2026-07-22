@@ -6,13 +6,13 @@ using System.Collections.Generic;
 
 using Assets.Scripts.Inventory__Items__Pickups.Items;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-[BepInPlugin("com.megabonk.mod", "MegaBonk Mod", "1.4.1")]
+[BepInPlugin("com.megabonk.mod", "MegabonkCommunityPatch", "1.4.2")]
 public class Plugin : BasePlugin
 {
     internal static string LeaderboardServer = "https://megabonk-lb.fly.dev";
-    internal const  string ModVersion        = "1.4.1";
+    internal const  string ModVersion        = "1.4.2";
 
     internal const bool PatchGrandmasTonic = true;
 
@@ -48,14 +48,21 @@ public class Plugin : BasePlugin
         CursedSwordAim.Init(Config);
         WeaponSfxVolume.Init(Config);
         AutoLevelPick.Init(Config);
+        GuiWindowFrame.SetConfig(Config);
+
+        // F1 mod menu OFF by default (enable under Settings > Community Patch)
+        var modMenuCfg = Config.Bind("General", "ModMenuEnabled", false,
+            "Enable the F1 mod menu (God Mode, spawn items, etc.)");
+        ModGui.ModMenuEnabled = modMenuCfg.Value;
 
         ClassInjector.RegisterTypeInIl2Cpp<ModGui>();
         ClassInjector.RegisterTypeInIl2Cpp<ScrollWheelDetector>();
         var harmony = new Harmony("com.megabonk.mod");
-        harmony.PatchAll(typeof(Plugin).Assembly);
+        PatchModules.Init(harmony);
+        PatchModules.RegisterAll();
         GuiInstance = AddComponent<ModGui>();
 
-        Log.LogInfo($"[MegaBonkMod] Loaded. Server={LeaderboardServer}");
+        Log.LogInfo($"[MegabonkCommunityPatch] Loaded. Server={LeaderboardServer}");
     }
 
     internal static int GetItemCap(EItem item) => item switch

@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.4.2
+- Chest Odds Tracker: removed background and title, removed luck display (shown in stats page), fixed percentages (moved decimal point 2 places left), hidden by default with hotkey toggle (F12) in settings.
+- Leaderboard tabs renamed: Global → "Weekly" (resets each week); the repurposed Friends tab is now "Lifetime" — a permanent top-100 that survives the weekly reset. Scrollable.
+- Lifetime character filter: icon button cycles All → each character. The board is fetched once and sliced locally, so switching is instant.
+- Leaderboard avatars: Lifetime and Personal tabs show your Steam avatar, cached so scrolling doesn't re-fetch.
+- Leaderboard fixes: empty-board crash, Personal data sticking on the Weekly tab, the loading spinner lingering after data arrived, and a launch slowdown from repeated server fetches.
+- Fixed the Personal leaderboard tab displaying duplicate entries for the same character when the server returns multiple records. It now properly deduplicates the list and only displays the absolute best score per character.
+- Bombus is now a pure weapon-damage check: only player weapons hurt him (items, auras, executes don't apply), with HP raised so a crit can't one-shot him. Minimap icon size + a per-frame lag fix.
+- Game Speed (T) is no longer treated as a cheat — it won't block leaderboard submission.
+- F1 mod menu is OFF by default (enable under Settings ▸ Community Patch). New "Give 1 of Every Item" cheat button.
+- Bob's Lantern fire-rate buff trimmed (2x → 1.5x) to reduce explosion stutter.
+- Scaling Auto-Upgrade: fixed a level-up that could be eaten with no pick; Mythic rarity now ranks above Legendary in pick priority; maxed gear is never picked.
+- SFX volume sliders no longer scale the player-getting-hit or chest-opening sounds.
+- Performance: fixed a severe endgame FPS collapse — mod hooks on damage methods fired ~300k times/sec deep into overtime, starving the GC. They now install only while needed (Bombus alive, Instakill on, BT Dagger fired). Plus an optional Profiler toggle and a per-frame budget for Priority Targeting.
+- Performance: first F1 menu open no longer hitches, and menu drawing cost is roughly halved while any mod window is open.
+- Performance: hot-path mod hooks (Cactus scaling, enemy-speed, Priority Targeting) now install/uninstall on demand instead of running idle.
+- The warning banners (update available / other mods detected / mod menu used) merged into one "Notices" panel that can be dragged off the run timer and resized.
+- All mod windows now remember position and size across game restarts.
+- Typing the F1 menu password no longer moves the character — game keyboard input is muted while the prompt is open.
+
 ## 1.4.1
 - Added Map Scanner: pick how many map features you want, then auto-reroll the run until a map matches and it stops + pauses. Criteria: Moais, Shady Guys, a combined Moai+Shady count, Boss Curses (exact match), total Microwaves, and Microwaves by tier (Common/Rare/Epic/Legendary). Two rebindable hotkeys in the Community Patch settings tab — F4 opens the window, F5 starts/stops the scan. Runs fully in-process (reads the game's own interactable counts and uses its own restart, no external tool).
 - Added a native "Community Patch" tab in the game's Settings menu: rebind every mod hotkey, and adjust the new sliders below — no config-file editing needed.

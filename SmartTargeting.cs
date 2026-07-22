@@ -1,122 +1,119 @@
-using BepInEx.Configuration;
-using HarmonyLib;
-using UnityEngine;
-using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Assets.Scripts.Actors.Enemies;
-using Assets.Scripts.Inventory__Items__Pickups.Weapons;
+using BepInEx.Configuration;
+using BepInEx.Core.Logging.Interpolation;
+using BepInEx.Logging;
+using Il2CppInterop.Runtime.InteropTypes.Arrays;
+using UnityEngine;
+using Object = UnityEngine.Object;
 
-namespace MegaBonkMod;
+namespace MegabonkCommunityPatch;
 
-// ─────────────────────────────────────────────────────────────────────────
-// SMART TARGETING
-//
-// A real target picker, tuned for Megabonk specifically (the game's own auto-aim
-// just grabs whatever it considers "targeted"). Enemies spawn in a full ring
-// around the player at all ranges, so plain "closest" is nearly meaningless
-// (there's always something close). Instead we score every candidate:
-//
-//   1. TIER (hard priority, never crossed):
-//        0 = boss-class  (Boss / StageBoss / FinalBoss / SummonerMiniboss)
-//        1 = elite
-//        2 = normal
-//      A boss always beats a swarm regardless of distance — that's the
-//      dangerous / valuable kill — so a separate "boss focus" toggle is
-//      redundant and folded in here.
-//
-//   2. Within a tier, minimise  cost = distance + HP_WEIGHT * hpRatio.
-//      Prefers enemies that are BOTH near the player (the bodies actually
-//      dealing contact damage in the ring) AND close to death (finish them so
-//      they stop hitting you), without overkilling a full-HP target when a
-//      near-dead one is just as close. HP_WEIGHT is in "metres per full HP bar",
-//      so a full-HP enemy is treated as ~HP_WEIGHT m farther than an identical
-//      near-dead one — distance still dominates across big gaps.
-//
-// Toggle with the Smart Targeting hotkey in the Community Patch settings tab.
-// When OFF we return true and the game's stock targeting runs unchanged.
-// ─────────────────────────────────────────────────────────────────────────
 internal static class SmartTargeting
 {
-    const int   AnyBoss   = 54;     // EEnemyFlag Boss|StageBoss|SummonerMiniboss|FinalBoss
-    const float HP_WEIGHT = 4f;     // metres of "distance" one full HP bar is worth
+	private const int AnyBoss = 54;
 
-    static ConfigEntry<bool> _enabled;
+	private const float HP_WEIGHT = 4f;
 
-    internal static bool Enabled
-    {
-        get => _enabled != null && _enabled.Value;
-        set { if (_enabled != null) _enabled.Value = value; }
-    }
+	private const int MaxPicksPerFrame = 12;
 
-    internal static void Init(ConfigFile cfg)
-    {
-        // Named "Priority Targeting" to avoid clashing with the game's own
-        // built-in "Smart" aim mode (EEnemyTargetingMode.SmartAim).
-        _enabled = cfg.Bind("Targeting", "PriorityTargeting", false,
-            "Priority Targeting: replace auto-aim target selection with a scorer that " +
-            "prioritises bosses/elites, then the nearest enemy you can kill soonest. " +
-            "Toggle in-game with the Priority Targeting hotkey.");
-    }
+	private static int _frameOfLastPick = -1;
 
-    internal static void Toggle()
-    {
-        Enabled = !Enabled;
-        string state = Enabled ? "ON" : "OFF";
-        Plugin.Log.LogInfo($"[PriorityTargeting] {state}");
-        Toast.Show($"Priority Targeting: {state}",
-                   Enabled ? new Color(0.5f, 1f, 0.5f, 1f) : new Color(1f, 0.6f, 0.45f, 1f));
-    }
+	private static int _picksThisFrame = 0;
 
-    // Score the collider set and return the best target, or null if none valid
-    // (in which case we let the game's own targeting take over).
-    internal static Enemy Pick(Il2CppReferenceArray<Collider> colliders, int count, Vector3 pos, GameObject exceptObject)
-    {
-        Enemy best = null;
-        int   bestTier = int.MaxValue;
-        float bestCost = float.MaxValue;
-        int   exceptId = exceptObject != null ? exceptObject.GetInstanceID() : 0;
+	private static ConfigEntry<bool> _enabled;
 
-        for (int i = 0; i < count; i++)
-        {
-            var col = colliders[i];
-            if (col == null) continue;
-            if (exceptId != 0 && col.gameObject.GetInstanceID() == exceptId) continue;
+	internal static bool Enabled
+	{
+		get
+		{
+			return _enabled != null && _enabled.Value;
+		}
+		set
+		{
+			if (_enabled != null)
+			{
+				_enabled.Value = value;
+			}
+			PatchModules.ReevaluateAll();
+		}
+	}
 
-            var e = col.GetComponent<Enemy>();
-            if (e == null) continue;
-            if (e.IsDead() || e.IsDeadOrDyingNextFrame()) continue;
+	internal static bool TryTakePickBudget()
+	{
+		int frameCount = Time.frameCount;
+		if (frameCount != _frameOfLastPick)
+		{
+			_frameOfLastPick = frameCount;
+			_picksThisFrame = 0;
+		}
+		if (_picksThisFrame >= 12)
+		{
+			return false;
+		}
+		_picksThisFrame++;
+		return true;
+	}
 
-            int tier = ((int)e.enemyFlag & AnyBoss) != 0 ? 0 : (e.IsElite() ? 1 : 2);
-            if (tier > bestTier) continue;   // can't beat a higher-priority tier
+	internal static void Init(ConfigFile cfg)
+	{
+		_enabled = cfg.Bind<bool>("Targeting", "PriorityTargeting", false, "Priority Targeting: replace auto-aim target selection with a scorer that prioritises bosses/elites, then the nearest enemy you can kill soonest. Toggle in-game with the Priority Targeting hotkey.");
+	}
 
-            float dist = Vector3.Distance(e.GetCenterPosition(), pos);
-            float cost = dist + HP_WEIGHT * e.GetHpRatio();
+	internal static void Toggle()
+	{
+		//IL_002e: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0034: Expected O, but got Unknown
+		//IL_0094: Unknown result type (might be due to invalid IL or missing references)
+		//IL_0079: Unknown result type (might be due to invalid IL or missing references)
+		Enabled = !Enabled;
+		string text = (Enabled ? "ON" : "OFF");
+		ManualLogSource log = Plugin.Log;
+		bool flag = default(bool);
+		BepInExInfoLogInterpolatedStringHandler val = new BepInExInfoLogInterpolatedStringHandler(20, 1, out flag);
+		if (flag)
+		{
+			((BepInExLogInterpolatedStringHandler)val).AppendLiteral("[PriorityTargeting] ");
+			((BepInExLogInterpolatedStringHandler)val).AppendFormatted<string>(text);
+		}
+		log.LogInfo(val);
+		Toast.Show("Priority Targeting: " + text, Enabled ? new Color(0.5f, 1f, 0.5f, 1f) : new Color(1f, 0.6f, 0.45f, 1f));
+	}
 
-            if (tier < bestTier || cost < bestCost)
-            {
-                bestTier = tier;
-                bestCost = cost;
-                best = e;
-            }
-        }
-        return best;
-    }
-}
-
-// Replace target selection when Smart Targeting is on. GetTargetedEnemy is the
-// game's per-shot "which enemy does this projectile aim at" call.
-[HarmonyPatch(typeof(EnemyTargeting), "GetTargetedEnemy")]
-static class Patch_SmartTargeting
-{
-    [HarmonyPrefix]
-    static bool Prefix(Il2CppReferenceArray<Collider> colliders, int count, Vector3 pos,
-                       bool useVision, GameObject exceptObject, ref Enemy __result)
-    {
-        if (!SmartTargeting.Enabled) return true;            // stock targeting
-
-        var pick = SmartTargeting.Pick(colliders, count, pos, exceptObject);
-        if (pick == null) return true;                       // nothing valid → let game decide
-
-        __result = pick;
-        return false;                                        // skip original
-    }
+	internal static Enemy Pick(Il2CppReferenceArray<Collider> colliders, int count, Vector3 pos, GameObject exceptObject)
+	{
+		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00a8: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00cc: Unknown result type (might be due to invalid IL or missing references)
+		//IL_00d1: Unknown result type (might be due to invalid IL or missing references)
+		Enemy result = null;
+		int num = int.MaxValue;
+		float num2 = float.MaxValue;
+		int num3 = (((UnityEngine.Object)(object)exceptObject != (UnityEngine.Object)null) ? ((Object)exceptObject).GetInstanceID() : 0);
+		for (int i = 0; i < count; i++)
+		{
+			Collider val = ((Il2CppArrayBase<Collider>)(object)colliders)[i];
+			if ((UnityEngine.Object)(object)val == (UnityEngine.Object)null || (num3 != 0 && ((Object)((Component)val).gameObject).GetInstanceID() == num3))
+			{
+				continue;
+			}
+			Enemy component = ((Component)val).GetComponent<Enemy>();
+			if ((UnityEngine.Object)(object)component == (UnityEngine.Object)null || component.IsDead() || component.IsDeadOrDyingNextFrame())
+			{
+				continue;
+			}
+			int num4 = ((((int)component.enemyFlag & 0x36) == 0) ? (component.IsElite() ? 1 : 2) : 0);
+			if (num4 <= num)
+			{
+				float num5 = Vector3.Distance(component.GetCenterPosition(), pos);
+				float num6 = num5 + 4f * component.GetHpRatio();
+				if (num4 < num || num6 < num2)
+				{
+					num = num4;
+					num2 = num6;
+					result = component;
+				}
+			}
+		}
+		return result;
+	}
 }
