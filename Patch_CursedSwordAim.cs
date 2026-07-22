@@ -8,20 +8,9 @@ using Object = UnityEngine.Object;
 
 namespace MegabonkCommunityPatch;
 
-using BepInEx.Configuration;
-
 [HarmonyPatch(typeof(ProjectileCringeSword), "TryInit")]
 internal static class Patch_CursedSwordAim
 {
-	private static ConfigEntry<bool> _enabled;
-
-	internal static bool Enabled => _enabled != null && _enabled.Value;
-
-	internal static void Init(ConfigFile cfg)
-	{
-		_enabled = cfg.Bind<bool>("Combat", "CursedSwordSlopeAim", true, "Cursed Sword auto-aim follows your character rotation on slopes.");
-	}
-
 	internal struct AimState
 	{
 		public bool Changed;
@@ -85,10 +74,10 @@ internal static class Patch_CursedSwordAim
 				if (!(val.sqrMagnitude < 0.0001f))
 				{
 					val.Normalize();
-				__state.Renderer = transform;
-				__state.Saved = transform.rotation;
-				__state.Changed = true;
-				transform.rotation = Quaternion.LookRotation(-val, transform.up);
+					__state.Renderer = transform;
+					__state.Saved = transform.rotation;
+					__state.Changed = true;
+					transform.rotation = Quaternion.LookRotation(-val);
 				}
 			}
 		}
