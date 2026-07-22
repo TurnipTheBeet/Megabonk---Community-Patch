@@ -79,10 +79,10 @@ internal static class Patch_SpaceNoodle_Buffs
         WeaponBase wb = ((ConstantAttack)__instance).weaponBase;
         if (wb == null) return;
 
-        // Use GetAttackSizeMultiplier which scales with weapon + player size
+        // GetAttackSizeMultiplier returns playerSizeStat * weaponSizeStat
         float sizeMult = WeaponUtility.GetAttackSizeMultiplier(wb);
-        // Base radius 1.5m, scales with size multiplier
-        float radius = 1.5f * Mathf.Max(sizeMult, 1f);
+        // Base radius 1.5m × weapon size multiplier × player size multiplier
+        float radius = 1.5f * sizeMult;
 
         // Deal AoE damage around the target
         Collider[] hits = SpaceNoodleState.Buf;
