@@ -30,11 +30,10 @@ public class Plugin : BasePlugin
     {
         Log = base.Log;
 
-        Diag.Install();   // capture full Unity stack traces (diagnosing settings-close NRE)
+        Diag.Install();
 
         var cfgServer = Config.Bind("Leaderboard", "ServerUrl", LeaderboardServer,
             "DO NOT CHANGE THIS. Only modify if you are the server host running locally (use http://localhost:9000).");
-        // Override stale IPs on update — preserve localhost override for server host
         if (!cfgServer.Value.Contains("localhost"))
             cfgServer.Value = LeaderboardServer;
         LeaderboardServer = cfgServer.Value;
@@ -52,7 +51,6 @@ public class Plugin : BasePlugin
         AutoLevelPick.Init(Config);
         GuiWindowFrame.SetConfig(Config);
 
-        // F1 mod menu OFF by default (enable under Settings > Community Patch)
         var modMenuCfg = Config.Bind("General", "ModMenuEnabled", false,
             "Enable the F1 mod menu (God Mode, spawn items, etc.)");
         ModGui.ModMenuEnabled = modMenuCfg.Value;
