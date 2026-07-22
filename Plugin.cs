@@ -45,7 +45,6 @@ public class Plugin : BasePlugin
         MapScanner.Init(Config);
         SkipChestSync.Init(Config);
         SmartTargeting.Init(Config);
-        CursedSwordAim.Init(Config);
         Patch_Revolver_ManualAim.Init(Config);
         SpaceNoodleState.Init(Config);
         Patch_SpaceNoodle_Buffs.Init(Config);
