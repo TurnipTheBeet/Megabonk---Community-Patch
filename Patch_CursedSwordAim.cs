@@ -74,10 +74,10 @@ internal static class Patch_CursedSwordAim
 				if (!(val.sqrMagnitude < 0.0001f))
 				{
 					val.Normalize();
-					__state.Renderer = transform;
-					__state.Saved = transform.rotation;
-					__state.Changed = true;
-					transform.rotation = Quaternion.LookRotation(-val);
+				__state.Renderer = transform;
+				__state.Saved = transform.rotation;
+				__state.Changed = true;
+				transform.rotation = Quaternion.LookRotation(-val, transform.up);
 				}
 			}
 		}
