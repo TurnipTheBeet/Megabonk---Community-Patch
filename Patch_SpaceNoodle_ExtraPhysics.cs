@@ -5,6 +5,8 @@ using Assets.Scripts.Actors.Player;
 using Assets.Scripts.Game.Combat.ConstantAttacks;
 using Assets.Scripts.Inventory__Items__Pickups.Items;
 using Assets.Scripts.Inventory__Items__Pickups.Weapons;
+using Assets.Scripts.Inventory__Items__Pickups.Weapons.Projectiles;
+using BepInEx.Configuration;
 using HarmonyLib;
 using Il2CppInterop.Runtime.InteropTypes;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
@@ -23,7 +25,14 @@ namespace MegabonkCommunityPatch;
 [HarmonyPatch]
 internal static class Patch_SpaceNoodle_Buffs
 {
-    internal static bool Enabled = false;
+	private static ConfigEntry<bool> _enabled;
+
+	internal static bool Enabled => _enabled != null && _enabled.Value;
+
+	internal static void Init(ConfigFile cfg)
+	{
+		_enabled = cfg.Bind<bool>("Experimental", "SpaceNoodleBuffs", false, "Space Noodle: faster latch/burst, reduced cooldown, and AoE burst damage scaling with size.");
+	}
 
     // ── Timing overrides ──────────────────────────────────────────────
     // Override the weapon data fields that control latch/burst timing

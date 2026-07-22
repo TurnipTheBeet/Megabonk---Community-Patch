@@ -46,6 +46,9 @@ public class Plugin : BasePlugin
         SkipChestSync.Init(Config);
         SmartTargeting.Init(Config);
         CursedSwordAim.Init(Config);
+        Patch_Revolver_ManualAim.Init(Config);
+        SpaceNoodleState.Init(Config);
+        Patch_SpaceNoodle_Buffs.Init(Config);
         WeaponSfxVolume.Init(Config);
         AutoLevelPick.Init(Config);
         GuiWindowFrame.SetConfig(Config);
