@@ -30,7 +30,7 @@ internal static class Patch_CanToggleActivation_NonToggleable
 		}
 		if ((UnityEngine.Object)(object)unlockable == (UnityEngine.Object)(object)instance.GetItem((EItem)38) || (UnityEngine.Object)(object)unlockable == (UnityEngine.Object)(object)instance.GetItem((EItem)82) || (UnityEngine.Object)(object)unlockable == (UnityEngine.Object)(object)instance.GetItem((EItem)7) || (UnityEngine.Object)(object)unlockable == (UnityEngine.Object)(object)instance.GetItem((EItem)0))
 		{
-			__result = false;
+			__result = true;
 			return false;
 		}
 		return true;

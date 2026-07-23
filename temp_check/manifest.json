@@ -1,9 +1,0 @@
-{
-    "name": "Megabonk_Community_Patch",
-    "version_number": "1.4.2",
-    "website_url": "https://github.com/TurnipTheBeet/Megabonk---Community-Patch",
-    "description": "Community patch: leaderboard, Tony passive, Golden Shield fix, item/size cap removal, stat blacklists, fast fall, and more.",
-    "dependencies": [
-        "BepInEx-BepInExPack_IL2CPP-6.0.755"
-    ]
-}
