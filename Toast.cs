@@ -11,6 +11,9 @@ internal static class Toast
     static Color  _col = Color.white;
     static float  _until;
 
+    static GUIStyle _cachedStyle;
+    static int       _cachedFontSize;
+
     internal static void Show(string msg, Color col, float seconds = 2.5f)
     {
         _msg = msg; _col = col; _until = Time.unscaledTime + seconds;
@@ -27,14 +30,17 @@ internal static class Toast
         float x = (Screen.width - w) / 2f;
         float y = Screen.height * 0.16f;
 
-        // GUIStyle.fontSize is a plain int (safe). Avoid TextAnchor / FontStyle —
-        // those enums live in assemblies this csproj doesn't reference (CS0012).
-        // GUI.Box already centers its text, so cloning skin.box is enough.
-        var style = new GUIStyle(GUI.skin.box) { fontSize = Mathf.RoundToInt(20f * scale) };
+        // Cache the GUIStyle — only recreate when font size changes.
+        int fs = Mathf.RoundToInt(20f * scale);
+        if (_cachedStyle == null || fs != _cachedFontSize)
+        {
+            _cachedStyle = new GUIStyle(GUI.skin.box) { fontSize = fs };
+            _cachedFontSize = fs;
+        }
 
         var prev = GUI.color;
         GUI.color = _col;
-        GUI.Box(new Rect(x, y, w, h), _msg, style);
+        GUI.Box(new Rect(x, y, w, h), _msg, _cachedStyle);
         GUI.color = prev;
     }
 }

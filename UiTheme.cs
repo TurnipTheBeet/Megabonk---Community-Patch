@@ -14,13 +14,13 @@ internal static class UiTheme
     internal static float Opacity
     {
         get => _opacity != null ? _opacity.Value : 0.85f;
-        set { if (_opacity != null) _opacity.Value = Mathf.Clamp(value, 0.2f, 1f); }
+        set { if (_opacity != null) _opacity.Value = Mathf.Clamp01(value); }
     }
 
     internal static void Init(ConfigFile cfg)
     {
         _opacity = cfg.Bind("UI", "MenuOpacity", 0.85f,
-            "Background opacity of the mod's custom windows (0.2 = see-through, 1.0 = solid). Also adjustable live in the F1 menu.");
+            "Background opacity of the mod's custom windows (0 = invisible, 1 = solid). Also adjustable live in the F1 menu.");
     }
 
     static Texture2D Tex()

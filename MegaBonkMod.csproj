@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>MegaBonkMod</AssemblyName>
     <RootNamespace>MegaBonkMod</RootNamespace>
@@ -76,7 +77,5 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-
-
 
 </Project>

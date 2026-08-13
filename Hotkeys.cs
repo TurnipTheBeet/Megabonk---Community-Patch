@@ -15,11 +15,10 @@ internal static class Hotkeys
     internal static ConfigEntry<KeyCode> MapScanner;
     internal static ConfigEntry<KeyCode> MapScanToggle;
     internal static ConfigEntry<KeyCode> SkipChest;
-    internal static ConfigEntry<KeyCode> SmartTargeting;
-    internal static ConfigEntry<KeyCode> AutoUpgrade;
-    internal static ConfigEntry<KeyCode> AutoUpgradeLog;
     internal static ConfigEntry<KeyCode> EffectsOpacity;
     internal static ConfigEntry<KeyCode> GameSpeed;
+    internal static ConfigEntry<KeyCode> PowerupTracker;
+    internal static ConfigEntry<KeyCode> ChestOddsTracker;
 
     // True while the rebind UI is waiting for the next key — ModGui suppresses
     // hotkey actions for that frame so the captured key doesn't also fire.
@@ -46,11 +45,10 @@ internal static class Hotkeys
         MapScanner     = cfg.Bind("Hotkeys", "MapScanner",       KeyCode.F4,    "Toggle the map scanner window.");
         MapScanToggle  = cfg.Bind("Hotkeys", "MapScanToggle",    KeyCode.F5,    "Start / stop the map scan (auto-reroll until the map matches your criteria).");
         SkipChest      = cfg.Bind("Hotkeys", "SkipChest",        KeyCode.F6,    "Toggle Smart Skip Chest Animation (auto-skips when banishes are 0).");
-        SmartTargeting = cfg.Bind("Hotkeys", "PriorityTargeting", KeyCode.F7,   "Toggle Priority Targeting (prioritise bosses/elites, then nearest killable).");
-        AutoUpgrade    = cfg.Bind("Hotkeys", "AutoUpgrade",      KeyCode.F8,    "Toggle Scaling Auto-Upgrade (auto-pick level-up choices favouring scaling).");
-        AutoUpgradeLog = cfg.Bind("Hotkeys", "AutoUpgradeLog",   KeyCode.F9,    "Toggle the Scaling Auto-Upgrade log window (shows what it picked and over what).");
         EffectsOpacity = cfg.Bind("Hotkeys", "EffectsOpacity",   KeyCode.F11,   "Toggle the game's Effects opacity (Settings > Effects) between 0% and 100%.");
-        GameSpeed      = cfg.Bind("Hotkeys", "GameSpeed",        KeyCode.T,     "Toggle game speed between 1x and 2x. Counts as a cheat (blocks leaderboard submission).");
+        GameSpeed      = cfg.Bind("Hotkeys", "GameSpeed",        KeyCode.T,     "Toggle game speed between 1x and 2x.");
+        PowerupTracker = cfg.Bind("Hotkeys", "PowerupTracker",   KeyCode.Period,    "Toggle the active powerup tracker overlay.");
+        ChestOddsTracker = cfg.Bind("Hotkeys", "ChestOddsTracker", KeyCode.Slash,  "Toggle the chest rarity odds tracker overlay.");
     }
 
     // The rebindable entries in display order — drives the settings-tab rows.
@@ -63,11 +61,10 @@ internal static class Hotkeys
         ("Map Scanner",      MapScanner),
         ("Map Scan Start/Stop", MapScanToggle),
         ("Smart Skip Chest", SkipChest),
-        ("Priority Targeting", SmartTargeting),
-        ("Scaling Auto-Upgrade",  AutoUpgrade),
-        ("Auto-Upgrade Log",      AutoUpgradeLog),
         ("Effects Opacity 0/100", EffectsOpacity),
         ("Game Speed 1x/2x",      GameSpeed),
+        ("Powerup Tracker",       PowerupTracker),
+        ("Chest Odds Tracker",    ChestOddsTracker),
     };
 
     internal static string Pretty(KeyCode k) => k switch

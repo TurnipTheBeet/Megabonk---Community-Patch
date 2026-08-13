@@ -56,7 +56,7 @@ A community-driven balance and quality-of-life mod for Megabonk.
 
 ## Items
 
-- **Item Caps** — Anvil (max 2), Overpowered Lamp (max 3), Za Warudo (max 10)
+- **Item Caps** — Anvil (max 2), Overpowered Lamp (max 2), Za Warudo (max 10)
 - **Grandma's Secret Tonic** — baseRadius=4, radiusPerAmount=2, maxRadius=16m (max 6 stacks); pool slot removed once cap is reached
 - **Spicy Meatball** — baseRadius=8, radiusPerAmount=4, maxRadius=32m (2× Grandma's values)
 - **Brass Knuckles** — size cap removed

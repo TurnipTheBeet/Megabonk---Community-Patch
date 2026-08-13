@@ -23,26 +23,29 @@ namespace MegaBonkMod;
 //   • "map ready" is detected via MapGenerationController.isGenerating + mapSeed
 //   • the optional pause-on-hit uses the game's own PauseUi.Pause()
 // The scan loop is ticked once per frame from ModGui.Update (main thread).
+// Text stays fixed-size on resize.
 // ─────────────────────────────────────────────────────────────────────────
 internal static class MapScanner
 {
-    // A row in the scanner. `key` is the internal id used for config + count
-    // lookup; `match` substrings are matched (case-insensitive) against the
-    // game's interactable debugName keys (null = computed specially).
     sealed class Row
     {
         public string Key;
         public string Label;
-        public string[] Match;            // dict substrings, or null for special
-        public EItemRarity? MwTier;       // set for microwave-tier rows
-        public bool Combined;             // Moai + Shady combined row
-        public bool MwAny;                // total microwaves (all tiers)
-        public bool Exact;                // require count == want (not >=)
+        public string[] Match;
+        public EItemRarity? MwTier;
+        public EItemRarity? ShadyTier;
+        public bool Combined;
+        public bool MwAny;
+        public bool ShadyAny;
+        public bool Balance;
+        public bool Exact;
     }
 
     static readonly Row[] Rows =
     {
         new() { Key = "bosscurse",  Label = "Boss Curses (exact)",   Match = new[] { "curse" }, Exact = true },
+         new() { Key = "balance",    Label = "Balance Shrines",       Balance = true },
+        new() { Key = "challenge",  Label = "Challenge Shrines (exact)", Match = new[] { "challenge" }, Exact = true },
         new() { Key = "magnet",     Label = "Magnet Shrines",        Match = new[] { "magnet" } },
         new() { Key = "mw_any",     Label = "Microwave: Any",        MwAny = true },
         new() { Key = "mw_common",  Label = "Microwave: Common",     MwTier = EItemRarity.Common },
@@ -50,11 +53,15 @@ internal static class MapScanner
         new() { Key = "mw_epic",    Label = "Microwave: Epic",       MwTier = EItemRarity.Epic },
         new() { Key = "mw_legend",  Label = "Microwave: Legendary",  MwTier = EItemRarity.Legendary },
         new() { Key = "moaishady",  Label = "Moai + Shady (any)",    Combined = true },
-        new() { Key = "moais",      Label = "Moais",                 Match = new[] { "moai" } },
-        new() { Key = "shady",      Label = "Shady Guy",             Match = new[] { "shady" } },
+         new() { Key = "moais",      Label = "Moais",                 Match = new[] { "moai" } },
+         new() { Key = "sg_any",     Label = "Shady Guy: Any",        ShadyAny = true },
+         new() { Key = "sg_common",  Label = "Shady Guy: Common",     ShadyTier = EItemRarity.Common },
+         new() { Key = "sg_rare",    Label = "Shady Guy: Rare",       ShadyTier = EItemRarity.Rare },
+         new() { Key = "sg_epic",    Label = "Shady Guy: Epic",       ShadyTier = EItemRarity.Epic },
+         new() { Key = "sg_legend",  Label = "Shady Guy: Legendary",  ShadyTier = EItemRarity.Legendary },
     };
 
-    static ConfigEntry<int>[] _desired;     // parallel to Rows; min wanted (0 = ignore)
+    static ConfigEntry<int>[] _desired;
     static ConfigFile _cfg;
 
     internal static bool   Visible;
@@ -62,40 +69,37 @@ internal static class MapScanner
     internal static int    Attempts;
     internal static string Status = "Idle";
 
-    // Last computed current-count per row key (for GUI display + matching).
     static Dictionary<string, int> _cur = new();
     static float _nextLiveRefresh;
 
-    // Scan-loop bookkeeping.
     static int  _seedAtRestart;
     static bool _awaitingNewMap;
 
-    // Window geometry
     const float WinW = 320f, PadX = 12f, LineH = 24f;
     static readonly GuiWindowFrame _frame = new(new Vector2(360f, 80f));
     static float _lastWinH;
 
     static float WinHeight() =>
-        LineH + 8f                       // title
-        + LineH                          // hint
-        + Rows.Length * (LineH + 2f)     // rows
-        + LineH                          // hotkey state line
-        + LineH + 8f;                    // status (scan start/stop is on a hotkey)
+        LineH + 8f
+        + LineH
+        + Rows.Length * (LineH + 2f)
+        + LineH
+        + LineH + 8f;
 
     internal static void Init(ConfigFile cfg)
     {
         _cfg = cfg;
+        _frame.Init(cfg, "MapScanner");
         _desired = new ConfigEntry<int>[Rows.Length];
         for (int i = 0; i < Rows.Length; i++)
             _desired[i] = cfg.Bind("MapScanner", Rows[i].Key, 0,
-                $"Desired '{Rows[i].Label}' the scanner waits for (0 = ignore).");
+                $"Desired '{Rows[i].Label}' the scanner waits for (-1 = ignore).");
     }
 
     internal static void Toggle() => Visible = !Visible;
 
     // ── core reads ────────────────────────────────────────────────────────
 
-    // Game's interactable counters (debugName -> numTotal on map).
     static Dictionary<string, int> ReadDict()
     {
         var result = new Dictionary<string, int>();
@@ -125,7 +129,6 @@ internal static class MapScanner
         return total;
     }
 
-    // Count live microwaves per rarity tier. Index by (int)EItemRarity.
     static int[] CountMicrowaveTiers()
     {
         var tiers = new int[6];
@@ -144,16 +147,52 @@ internal static class MapScanner
         return tiers;
     }
 
-    // Build the current-count map for every row from the live game state.
+    static int[] CountShadyGuyTiers()
+    {
+        var tiers = new int[6];
+        try
+        {
+            var sgs = Object.FindObjectsOfType<InteractableShadyGuy>();
+            if (sgs != null)
+                foreach (var sg in sgs)
+                {
+                    if (sg == null) continue;
+                    int r = (int)sg.rarity;
+                    if (r >= 0 && r < tiers.Length) tiers[r]++;
+                }
+        }
+        catch (System.Exception e) { Plugin.Log.LogWarning($"[MapScanner] sg: {e.Message}"); }
+        return tiers;
+    }
+
+    static int CountBalanceShrines()
+    {
+        try
+        {
+            var shrines = Object.FindObjectsOfType<InteractableShrineBalance>();
+            if (shrines == null) return 0;
+            int n = 0;
+            foreach (var s in shrines)
+                if (s != null) n++;
+            return n;
+        }
+        catch (System.Exception e) { Plugin.Log.LogWarning($"[MapScanner] balance: {e.Message}"); }
+        return 0;
+    }
+
     static Dictionary<string, int> ComputeCounts()
     {
         var dict  = ReadDict();
         var tiers = CountMicrowaveTiers();
+        var sgTiers = CountShadyGuyTiers();
         int moai  = DictCount(dict, new[] { "moai" });
         int shady = DictCount(dict, new[] { "shady" });
 
         int mwAny = 0;
         for (int t = 0; t < tiers.Length; t++) mwAny += tiers[t];
+
+        int sgAny = 0;
+        for (int t = 0; t < sgTiers.Length; t++) sgAny += sgTiers[t];
 
         var cur = new Dictionary<string, int>();
         foreach (var r in Rows)
@@ -162,6 +201,9 @@ internal static class MapScanner
             if (r.Combined)             v = moai + shady;
             else if (r.MwAny)           v = mwAny;
             else if (r.MwTier.HasValue) v = tiers[(int)r.MwTier.Value];
+            else if (r.ShadyAny)        v = sgAny;
+            else if (r.ShadyTier.HasValue) v = sgTiers[(int)r.ShadyTier.Value];
+            else if (r.Balance)         v = CountBalanceShrines();
             else                        v = DictCount(dict, r.Match);
             cur[r.Key] = v;
         }
@@ -171,7 +213,7 @@ internal static class MapScanner
     static bool AnyDesired()
     {
         for (int i = 0; i < _desired.Length; i++)
-            if (_desired[i].Value > 0) return true;
+            if (_desired[i].Value != -1) return true;
         return false;
     }
 
@@ -180,7 +222,7 @@ internal static class MapScanner
         for (int i = 0; i < Rows.Length; i++)
         {
             int want = _desired[i].Value;
-            if (want <= 0) continue;
+            if (want == -1) continue;
             cur.TryGetValue(Rows[i].Key, out int have);
             if (Rows[i].Exact) { if (have != want) return false; }
             else               { if (have <  want) return false; }
@@ -198,16 +240,11 @@ internal static class MapScanner
 
     static void PauseGame()
     {
-        // IMPORTANT: never fall back to Time.timeScale = 0. The game's own
-        // PauseUi.Pause() throws if called in a non-pausable state; a timeScale
-        // fallback there would freeze the game with no menu (soft-lock). Instead
-        // gate on CanPause()/IsPaused() so the call is always safe, and if it
-        // can't pause cleanly we just leave the run running.
         try
         {
             PauseUi pause = null;
             var handler = Object.FindObjectOfType<PauseHandler>();
-            if (handler != null) pause = handler.pauseUi;        // works even if the menu object is inactive
+            if (handler != null) pause = handler.pauseUi;
             if (pause == null) pause = Object.FindObjectOfType<PauseUi>();
             if (pause == null) return;
             if (pause.IsPaused()) return;
@@ -236,21 +273,19 @@ internal static class MapScanner
         Status          = msg;
     }
 
-    // Bound to a hotkey: start scanning, or stop if already running.
     internal static void ToggleScan()
     {
         if (Active) StopScan("Cancelled.");
         else        StartScan();
     }
 
-    // Ticked every frame from ModGui.Update.
     internal static void Tick()
     {
         if (!Active) return;
         try
         {
             if (MapController.IsMainMenu()) { StopScan("Left run."); return; }
-            if (MapGenerationController.isGenerating) return;   // still building
+            if (MapGenerationController.isGenerating) return;
 
             if (_awaitingNewMap)
             {
@@ -259,7 +294,7 @@ internal static class MapScanner
             }
 
             var cur = ComputeCounts();
-            if (!HasAnyCount(cur)) return;   // not populated yet this frame
+            if (!HasAnyCount(cur)) return;
             _cur = cur;
 
             if (Matches(cur))
@@ -289,11 +324,12 @@ internal static class MapScanner
         if (Visible) _frame.HandleInput(WinW, _lastWinH > 0f ? _lastWinH : WinHeight(), LineH + 4f);
     }
 
+    static readonly System.Text.StringBuilder _sb = new(64);
+
     internal static void Draw()
     {
         if (!Visible) return;
 
-        // Refresh live counts for display (throttled — FindObjectsOfType is heavy).
         if (!Active && !MapController.IsMainMenu() && Time.unscaledTime >= _nextLiveRefresh)
         {
             _nextLiveRefresh = Time.unscaledTime + 0.5f;
@@ -313,20 +349,30 @@ internal static class MapScanner
         float lx = ox + PadX;
         float y  = oy + LineH + 2f;
 
-        GUI.Label(new Rect(lx, y, cw, LineH), "Want at least (0 = ignore):");
+        GUI.Label(new Rect(lx, y, cw, LineH), "Want at least (-1 = ignore):");
         y += LineH;
 
         for (int i = 0; i < Rows.Length; i++)
         {
             _cur.TryGetValue(Rows[i].Key, out int have);
-            string lbl = (Active || _cur.Count > 0) ? $"{Rows[i].Label}  ({have})" : Rows[i].Label;
+            string lbl;
+            if (Active || _cur.Count > 0)
+            {
+                _sb.Clear(); _sb.Append(Rows[i].Label); _sb.Append("  ("); _sb.Append(have); _sb.Append(')');
+                lbl = _sb.ToString();
+            }
+            else
+            {
+                lbl = Rows[i].Label;
+            }
             GUI.Label(new Rect(lx, y, cw - 92f, LineH), lbl);
 
             GUI.enabled = !Active;
             float bx = lx + cw - 92f;
-            if (GUI.Button(new Rect(bx, y, 26f, LineH - 2f), "-") && _desired[i].Value > 0)
+            if (GUI.Button(new Rect(bx, y, 26f, LineH - 2f), "-") && _desired[i].Value > -1)
                 SetDesired(i, _desired[i].Value - 1);
-            GUI.Label(new Rect(bx + 34f, y, 26f, LineH), _desired[i].Value.ToString());
+            _sb.Clear(); _sb.Append(_desired[i].Value);
+            GUI.Label(new Rect(bx + 34f, y, 26f, LineH), _sb.ToString());
             if (GUI.Button(new Rect(bx + 64f, y, 26f, LineH - 2f), "+"))
                 SetDesired(i, _desired[i].Value + 1);
             GUI.enabled = true;
@@ -335,11 +381,19 @@ internal static class MapScanner
         }
 
         string hk = Hotkeys.Pretty(Hotkeys.MapScanToggle.Value);
-        string state = Active ? $"SCANNING — reroll #{Attempts}  ({hk} to stop)"
-                              : $"{hk} to start scan";
-        GUI.Label(new Rect(lx, y, cw, LineH), state);
+        if (Active)
+        {
+            _sb.Clear(); _sb.Append("SCANNING \u2014 reroll #"); _sb.Append(Attempts);
+                _sb.Append("  ("); _sb.Append(hk); _sb.Append(" to stop)");
+        }
+        else
+        {
+            _sb.Clear(); _sb.Append(hk); _sb.Append(" to start scan");
+        }
+        GUI.Label(new Rect(lx, y, cw, LineH), _sb.ToString());
         y += LineH;
-        GUI.Label(new Rect(lx, y, cw, LineH), $"Status: {Status}");
+        _sb.Clear(); _sb.Append("Status: "); _sb.Append(Status);
+        GUI.Label(new Rect(lx, y, cw, LineH), _sb.ToString());
 
         _frame.End(saved);
         _frame.DrawGrip(WinW, winH);
@@ -347,7 +401,6 @@ internal static class MapScanner
 
     static void SetDesired(int idx, int value)
     {
-        if (value < 0) value = 0;
         if (_desired[idx].Value == value) return;
         _desired[idx].Value = value;
         try { _cfg?.Save(); } catch { }

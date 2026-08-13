@@ -1,6 +1,7 @@
 using UnityEngine;
 using TMPro;
 using Assets.Scripts.Inventory__Items__Pickups.Pickups;
+using Assets.Scripts.Inventory__Items__Pickups.Items;
 
 namespace MegaBonkMod;
 
@@ -9,6 +10,11 @@ public class ModGui : MonoBehaviour
     public ModGui(System.IntPtr ptr) : base(ptr) { }
 
     internal static readonly System.Collections.Concurrent.ConcurrentQueue<System.Action> MainThread = new();
+
+    internal void InitConfig(BepInEx.Configuration.ConfigFile cfg)
+    {
+        _frame.Init(cfg, "ModMenu");
+    }
 
     private bool _visible;
     private bool _authenticated;
@@ -23,7 +29,7 @@ public class ModGui : MonoBehaviour
     internal static System.Collections.Generic.List<string> UnauthorizedMods = new();
     internal static bool CheatsUsed;
     internal static bool  ShowHitboxes    = false;
-    internal static float BombusAnnounceTime = -999f; // Time.time when BOMBUS spawned
+
     private Material  _hitboxMat;
     private Collider[] _cachedColliders;
     private int        _colliderCacheFrame = -999;
@@ -35,15 +41,17 @@ public class ModGui : MonoBehaviour
     private UnityEngine.UI.ScrollRect _damageScroll; // chart scroll (driven manually mid-game)
     // Mid-game chart REUSES the death-screen StatsWindows object. Track what we
     // mutate so it can be fully reverted when the player actually dies.
-    private bool    _chartMutated;
-    private bool    _addedCanvas;
+    private bool _chartMutated;
+    private bool _addedCanvas;
     private Vector2 _origAnchorMin, _origAnchorMax, _origPivot, _origAnchoredPos;
     private bool    _origRtCaptured;
 
     private readonly GuiWindowFrame _frame = new(new Vector2(20f, 20f));
     private float _lastWinH = 480f;   // last drawn logical height (for resize hit-test)
 
-    private bool _powerupOpen  = true;
+    private bool _powerupOpen = false;
+    private bool _itemsOpen = false;
+    private readonly bool[] _itemsRarityOpen = new bool[4]; // Common, Rare, Epic, Legendary
     internal static bool  GodMode      = false;
     internal static bool  FlyMode      = false;
     internal static float FlySpeed     = 20f;
@@ -67,6 +75,7 @@ public class ModGui : MonoBehaviour
 
         if (NeedVersionPatch)
         {
+            NeedVersionPatch = false;   // only attempt once per session
             string gameVer = UnityEngine.Application.version;
             var all = UnityEngine.Object.FindObjectsOfType<TMPro.TextMeshProUGUI>();
             foreach (var t in all)
@@ -76,7 +85,6 @@ public class ModGui : MonoBehaviour
                     var attr = (BepInEx.BepInPlugin)System.Attribute.GetCustomAttribute(typeof(Plugin), typeof(BepInEx.BepInPlugin));
                     string modVer = attr?.Version?.ToString() ?? "?";
                     t.text = $"Mod v{modVer}  |  " + t.text;
-                    NeedVersionPatch = false;
                     break;
                 }
             }
@@ -169,14 +177,11 @@ public class ModGui : MonoBehaviour
         if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.SkipChest.Value))
             SkipChestSync.Toggle();
 
-        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.SmartTargeting.Value))
-            SmartTargeting.Toggle();
+        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.PowerupTracker.Value))
+            PowerupTracker.Toggle();
 
-        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.AutoUpgrade.Value))
-            AutoLevelPick.Toggle();
-
-        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.AutoUpgradeLog.Value))
-            AutoLevelPick.ToggleWindow();
+        if (!Hotkeys.Suppressed && Input.GetKeyDown(Hotkeys.ChestOddsTracker.Value))
+            ChestOddsTracker.Toggle();
 
         MapScanner.Tick();
         SkipChestSync.Tick();
@@ -259,8 +264,10 @@ public class ModGui : MonoBehaviour
             ChaosMenu.HandleInput();
         if (MapScanner.Visible)
             MapScanner.HandleInput();
-        if (AutoLevelPick.Visible)
-            AutoLevelPick.HandleInput();
+        if (PowerupTracker.Enabled)
+            PowerupTracker.HandleInput();
+        if (ChestOddsTracker.Visible)
+            ChestOddsTracker.HandleInput();
     }
 
     internal void ResetChartCache()
@@ -337,9 +344,12 @@ public class ModGui : MonoBehaviour
     {
         try
         {
+            // Only search once per session. ResetChartCache() (called on StartPlaying
+            // and via RestoreForDeath) nulls _statsParent so the search retries on the
+            // next F2 press after a scene reload or reset.
             if (_statsParent == null)
             {
-                _statsParent  = GameObject.Find("GameUI/GameUI/DeathScreen/StatsWindows");
+                _statsParent = GameObject.Find("GameUI/GameUI/DeathScreen/StatsWindows");
                 if (_statsParent != null)
                 {
                     _damageWindow  = _statsParent.transform.Find("W_Damage")?.gameObject;
@@ -439,11 +449,28 @@ public class ModGui : MonoBehaviour
         catch { }
     }
 
+    private bool _imguiWarmed;
+
     private void OnGUI()
     {
+        // Force IMGUI internal init on the very first OnGUI frame so the user
+        // never pays the hitch when they first press F1/F3/F4/etc.
+        if (!_imguiWarmed)
+        {
+            _imguiWarmed = true;
+            var skin = GUI.skin;
+            if (skin != null)
+            {
+                var s = skin.label;   // forces font atlas + material creation
+                _ = s.normal.textColor;
+                _ = s.CalcSize(new GUIContent("X"));
+            }
+        }
+
         ChaosMenu.Draw();
         MapScanner.Draw();
-        AutoLevelPick.Draw();
+        PowerupTracker.Draw();
+        ChestOddsTracker.Draw();
         Toast.Draw();
 
         if (UpdateAvailable)
@@ -506,11 +533,24 @@ public class ModGui : MonoBehaviour
         winH += LineH + 4f; // godmode + flymode row
         winH += LineH + 4f; // instakill + freeze row
         winH += LineH + 4f; // fly speed row
-        winH += LineH + 4f; // BOMBUS button
         winH += LineH + 4f; // +1 min / -1 min buttons
-        if (inGame) winH += LineH + 4f; // restart run row (in-game only)
+        winH += LineH + 4f; // BOMBUS spawn button
         winH += LineH + 4f; // hitboxes toggle
         if (ShowHitboxes) winH += LineH + 4f; // hitbox distance slider
+        winH += LineH + 4f; // items section header
+        if (_itemsOpen)
+        {
+            for (int r = 0; r < 4; r++)
+            {
+                winH += LineH + 2f; // rarity subsection header
+                if (_itemsRarityOpen[r])
+                {
+                    int count = CountItemsInRarity((EItemRarity)r);
+                    winH += (LineH + 2f) * count; // each item row
+                    winH += LineH + 2f; // add all / remove all row
+                }
+            }
+        }
         winH += LineH + 8f;
 
         UiTheme.Backdrop(new Rect(wx, wy, WinW, winH));
@@ -580,23 +620,15 @@ public class ModGui : MonoBehaviour
         GUI.enabled = true;
         y += LineH + 4f;
 
-        string bombusLabel = GiantBeeState.PhaseActive ? "Spawn BOMBUS (again)" : "Spawn BOMBUS";
+        // ── BOMBUS spawn button ──
         GUI.enabled = inGame;
-        if (GUI.Button(new Rect(lx, y, cw, LineH), bombusLabel))
+        if (GUI.Button(new Rect(lx, y, cw, LineH), "Spawn BOMBUS"))
         {
-            GiantBeeState.Spawn(manualOverride: true);
+            BOMBUSSpawner.TrySpawn();
             CheatsUsed = true;
         }
         GUI.enabled = true;
         y += LineH + 4f;
-
-        // Restart only makes sense mid-run — hide entirely on the main menu.
-        if (inGame)
-        {
-            if (GUI.Button(new Rect(lx, y, cw, LineH), "Restart Run / Reroll Map"))
-                TryRestartRun();
-            y += LineH + 4f;
-        }
 
         ShowHitboxes = GUI.Toggle(new Rect(lx, y, cw, LineH), ShowHitboxes,
             ShowHitboxes ? "Hitboxes: ON" : "Hitboxes: OFF", btnStyle);
@@ -608,6 +640,66 @@ public class ModGui : MonoBehaviour
             GUI.Label(new Rect(lx, y + 3f, distLabelW, LineH), $"HB Dist: {HitboxMaxDist:F0}");
             HitboxMaxDist = GUI.HorizontalSlider(new Rect(lx + distLabelW, y + 6f, cw - distLabelW, LineH - 4f), HitboxMaxDist, 100f, 1000f);
             y += LineH + 4f;
+        }
+
+        // ── Items ──
+        _itemsOpen = GUI.Toggle(new Rect(lx, y, cw, LineH), _itemsOpen,
+            (_itemsOpen ? "[-] " : "[+] ") + "Items", btnStyle);
+        y += LineH + 2f;
+        if (_itemsOpen)
+        {
+            var dm = DataManager.Instance;
+            var itemDict = dm?.itemData;
+            if (itemDict != null)
+            {
+                string[] rarityNames = { "Common", "Rare", "Epic", "Legendary" };
+                for (int r = 0; r < 4; r++)
+                {
+                    _itemsRarityOpen[r] = GUI.Toggle(new Rect(indentX, y, cw - 12f, LineH), _itemsRarityOpen[r],
+                        (_itemsRarityOpen[r] ? "[-] " : "[+] ") + rarityNames[r], btnStyle);
+                    y += LineH + 2f;
+                    if (_itemsRarityOpen[r])
+                    {
+                        var inv = GameManager.Instance?.GetPlayerInventory()?.itemInventory;
+                        // Collect items of this rarity
+                        var rarityItems = new System.Collections.Generic.List<EItem>();
+                        foreach (var kv in itemDict)
+                        {
+                            if (kv.Value != null && kv.Value.rarity == (EItemRarity)r)
+                                rarityItems.Add(kv.Key);
+                        }
+                        // Add All / Remove All row
+                        float qtrW = (cw - 12f) / 2f;
+                        if (GUI.Button(new Rect(indentX, y, qtrW, LineH), "Add All"))
+                        {
+                            foreach (var item in rarityItems) inv?.AddItem(item);
+                            CheatsUsed = true;
+                        }
+                        if (GUI.Button(new Rect(indentX + qtrW + 2f, y, qtrW, LineH), "Remove All"))
+                        {
+                            foreach (var item in rarityItems) inv?.RemoveItem(item, false);
+                        }
+                        y += LineH + 2f;
+                        // Individual items
+                        foreach (var item in rarityItems)
+                        {
+                            string name = item.ToString();
+                            int amt = inv?.GetAmount(item) ?? 0;
+                            float qW = (cw - 12f) / 2f;
+                            if (GUI.Button(new Rect(indentX, y, qW, LineH), "+" + name))
+                            {
+                                inv?.AddItem(item);
+                                CheatsUsed = true;
+                            }
+                            if (GUI.Button(new Rect(indentX + qW + 2f, y, qW, LineH), "-" + name + " (" + amt + ")"))
+                            {
+                                inv?.RemoveItem(item, false);
+                            }
+                            y += LineH + 2f;
+                        }
+                    }
+                }
+            }
         }
 
         GUI.Label(new Rect(lx, y + 4f, cw, LineH), "F1 toggle | F2 chart | drag title | drag ↘ to resize");
@@ -757,6 +849,21 @@ public class ModGui : MonoBehaviour
 
     private static void HbLine(Vector3 a, Vector3 b) { GL.Vertex(a); GL.Vertex(b); }
 
+    static int CountItemsInRarity(EItemRarity rarity)
+    {
+        try
+        {
+            var dm = DataManager.Instance;
+            var dict = dm?.itemData;
+            if (dict == null) return 0;
+            int n = 0;
+            foreach (var kv in dict)
+                if (kv.Value != null && kv.Value.rarity == rarity) n++;
+            return n;
+        }
+        catch { return 0; }
+    }
+
     private static void SpawnPowerupRow(
         PickupManager pm, Vector3 pos,
         float x, ref float y, float cw,
@@ -764,9 +871,15 @@ public class ModGui : MonoBehaviour
     {
         float halfW = (cw - 4f) / 2f;
         if (GUI.Button(new Rect(x, y, halfW, LineH), leftLabel)  && pm != null)
+        {
             pm.SpawnPickup(left,  pos, 1, false, 0f);
+            CheatsUsed = true;
+        }
         if (GUI.Button(new Rect(x + halfW + 4f, y, halfW, LineH), rightLabel) && pm != null)
+        {
             pm.SpawnPickup(right, pos, 1, false, 0f);
+            CheatsUsed = true;
+        }
         y += LineH;
     }
 

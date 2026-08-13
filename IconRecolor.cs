@@ -90,14 +90,9 @@ internal static class IconRecolor
         RenderTexture.ReleaseTemporary(rt);
 
         var px = tex.GetPixels32();
-        const int RimBand = 2;
 
         // 0) Flood-fill the "outside" (exterior transparency) from the texture
-        //    border inward through connected transparent pixels. Transparent
-        //    pixels NOT reached are INTERIOR holes — gaps inside the art (e.g. the
-        //    spaces between Slurp Gloves' straps). We must treat only the outer
-        //    boundary as the rim; otherwise art bordering an interior hole gets
-        //    wrongly tinted (the blue blobs in the middle of the gloves).
+        //    border inward through connected transparent pixels.
         var outside = new bool[w * h];
         var stack   = new System.Collections.Generic.Stack<int>();
         void Seed(int idx) { if (px[idx].a < 32 && !outside[idx]) { outside[idx] = true; stack.Push(idx); } }
@@ -112,24 +107,8 @@ internal static class IconRecolor
             if (y < h - 1) Seed(i + w);
         }
 
-        // True if (x,y) is within RimBand of an EXTERIOR pixel or the texture
-        // border — i.e. it sits on the outer outline (never an interior hole).
-        bool NearOutside(int x, int y)
-        {
-            for (int oy = -RimBand; oy <= RimBand; oy++)
-                for (int ox = -RimBand; ox <= RimBand; ox++)
-                {
-                    int nx = x + ox, ny = y + oy;
-                    if (nx < 0 || ny < 0 || nx >= w || ny >= h) return true;
-                    if (outside[ny * w + nx]) return true;
-                }
-            return false;
-        }
-
         // 1) Auto-detect the rim color: opaque, saturated pixels that border the
-        //    EXTERIOR (not an interior hole). Averaged → actual rim shade. Adapts
-        //    per-icon, so it works even when the baked rim differs from the game's
-        //    data rarity color.
+        //    EXTERIOR. Averaged → actual rim shade.
         long sr = 0, sg = 0, sb = 0; int n = 0;
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
@@ -157,9 +136,9 @@ internal static class IconRecolor
         byte nr = (byte)(newC.r * 255f), ng = (byte)(newC.g * 255f), nb = (byte)(newC.b * 255f);
         int tol2 = Tol * Tol;
 
-        // 2) Remap pixels close to the detected rim color → the new rarity color,
-        //    but ONLY on the OUTER outline (within RimBand of exterior transparency).
-        //    Interior art and interior holes are left untouched.
+        // 2) Remap ALL pixels close to the detected rim color → the new rarity color.
+        //    The color tolerance limits us to pixels that actually match the old
+        //    rarity shade, so interior art with different colors is safe.
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++)
             {
@@ -169,8 +148,6 @@ internal static class IconRecolor
 
                 int dr = p.r - rr, dg = p.g - rg, db = p.b - rb;
                 if (dr * dr + dg * dg + db * db > tol2) continue;
-
-                if (!NearOutside(x, y)) continue;
 
                 px[i] = new Color32(nr, ng, nb, p.a);        // preserve edge alpha for AA
             }

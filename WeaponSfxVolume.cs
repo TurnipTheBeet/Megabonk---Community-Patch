@@ -47,7 +47,10 @@ internal static class WeaponSfxVolume
           "announce", "portal", "storm", "spawner" };
 
     // classification cached per RandomSfx instance id (owner never changes)
-    static readonly Dictionary<int, int>   _cat     = new();
+    // Key = instance ID, Value = (category, the object that owned that ID).
+    // Storing the object lets us detect stale entries when Unity's pool reuses
+    // an instance ID on a different GameObject.
+    static readonly Dictionary<int, (int cat, RandomSfx obj)> _cat = new();
     // authored baseline for the rare raw-AudioSource item path
     static readonly Dictionary<int, float> _origSrc = new();
 
@@ -117,14 +120,23 @@ internal static class WeaponSfxVolume
     {
         if (r == null) return 1f;
         int id = r.GetInstanceID();
-        if (!_cat.TryGetValue(id, out int c)) { c = Classify(r); _cat[id] = c; }
-        switch (c)
+        if (_cat.TryGetValue(id, out var entry) && entry.obj == r)
+            return entry.cat switch
+            {
+                WeaponCat => Weapon,
+                HitCat    => Hit,
+                ItemCat   => Item,
+                _         => 1f,
+            };
+        int c = Classify(r);
+        _cat[id] = (c, r);
+        return c switch
         {
-            case WeaponCat: return Weapon;
-            case HitCat:    return Hit;
-            case ItemCat:   return Item;
-            default:        return 1f;
-        }
+            WeaponCat => Weapon,
+            HitCat    => Hit,
+            ItemCat   => Item,
+            _         => 1f,
+        };
     }
 
     static int Classify(RandomSfx r)

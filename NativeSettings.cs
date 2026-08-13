@@ -48,9 +48,12 @@ internal static class NativeSettings
     static bool    _kcHas;
     static Texture _kcKdTex;        // KeyDisplay.background texture
     static Color   _kcKdColor   = Color.white;
-    static Texture _kcBtnTex;       // InputBtn0 RawImage texture (outer keycap)
+    static Texture _kcBtnTex;       // InputBtn0 RawImage texture (static, not used outside capture)
     static Color   _kcBtnColor  = Color.white;
     static Color   _kcTextColor = Color.white;
+
+    // deferred content build — true once we've done the heavy work
+    static bool _contentBuilt;
 
     // ── key capture state (polled by ModGui.Update via TickCapture) ──
     static bool _capturing;
@@ -77,56 +80,25 @@ internal static class NativeSettings
                 if (buttonsParent.GetChild(i).name == TabButtonName) return;
 
             if (sm.otherContent == null) { Log.LogWarning("[CP] otherContent null"); return; }
-            if (sm.controlPrefabNew == null) { Log.LogWarning("[CP] controlPrefabNew null"); return; }
 
-            // capture keycap visuals straight from the prefab asset (its serialized
-            // RawImage textures survive regardless of active state — unlike the live
-            // controlContent rows which are blank until the Controls tab is shown)
-            CaptureKeycapFromPrefab(sm.controlPrefabNew);
             var otherNode    = sm.otherContent.parent;       // the "Other" ScrollRect node
             var settingsMask = otherNode.parent;             // SettingsMask
 
-            // Build everything under an INACTIVE, DETACHED holder (no parent under
-            // the settings window). Two reasons:
-            //  1. Object.Instantiate of an active object runs the clones'
-            //     Awake/OnEnable immediately; building inactive avoids that.
-            //  2. Window caches its button list via GetComponentsInChildren<MyButton>
-            //     (includeInactive = true) over the whole window subtree. If our
-            //     transient clones (esp. the cloned "Other" rows we delete) lived
-            //     under the window when that list was built, destroying them would
-            //     leave dangling MyButton refs -> NRE in Window.UnfocusWindow on
-            //     close (cursor freeze). Keeping the holder detached means nothing
-            //     we destroy is ever a child of the window.
+            // Build the tab content holder (inactive, detached) — lightweight shell
+            // only. The heavy work (cloning rows, scanning sprites) is deferred to
+            // BuildContent which runs on first tab show.
             var holder = new GameObject("CP_Holder");
             holder.SetActive(false);
             var holderT = holder.transform;
 
-            // ── clone the tab content (inactive) ──
             var ourTab = Object.Instantiate(otherNode.gameObject, holderT);
             ourTab.name = "CP_Tab";
-
             var sr = ourTab.GetComponent<ScrollRect>();
             var content = sr != null && sr.content != null ? sr.content : ourTab.transform;
+            for (int i = content.childCount - 1; i >= 0; i--)
+                Object.DestroyImmediate(content.GetChild(i).gameObject);
 
-            for (int i = content.childCount - 1; i >= 0; i--)   // drop the cloned "Other" rows
-                Object.DestroyImmediate(content.GetChild(i).gameObject);  // immediate: must be gone before reparent
-
-            // ── build a row per hotkey from the native control-row prefab ──
-            _rows = new List<(KeyDisplay, ConfigEntry<KeyCode>)>();
-            foreach (var (label, entry) in Hotkeys.All())
-                BuildRow(sm.controlPrefabNew, content, label, entry);
-
-            // ── slider rows (cloned from the native audio slider prefab) ──
-            BuildSliderRow(sm.sliderPrefab, content, "Weapon SFX Volume",
-                () => WeaponSfxVolume.Weapon, v => WeaponSfxVolume.Weapon = v);
-            BuildSliderRow(sm.sliderPrefab, content, "Hit SFX Volume",
-                () => WeaponSfxVolume.Hit, v => WeaponSfxVolume.Hit = v);
-            BuildSliderRow(sm.sliderPrefab, content, "Item SFX Volume",
-                () => WeaponSfxVolume.Item, v => WeaponSfxVolume.Item = v);
-            BuildSliderRow(sm.sliderPrefab, content, "Mod Menu Opacity",
-                () => UiTheme.Opacity, v => UiTheme.Opacity = v);
-
-            // ── clone the tab button (inactive) ──
+            // ── clone the tab button (lightweight) ──
             var btnTemplate = buttonsParent.childCount > 0 ? buttonsParent.GetChild(0).gameObject : null;
             if (btnTemplate == null) { Log.LogWarning("[CP] no tab-button template"); Object.Destroy(holder); return; }
 
@@ -134,11 +106,10 @@ internal static class NativeSettings
             ourBtnGo.name = TabButtonName;
 
             var mbt = ourBtnGo.GetComponent<MyButtonTabs>();
-
             var btnTmp = ourBtnGo.GetComponentInChildren<TMP_Text>(true);
             if (btnTmp != null) { StripLocalizer(btnTmp.gameObject); btnTmp.text = "Mod"; }
 
-            // ── collect the game's tabs (still the only children of buttonsParent) ──
+            // ── collect the game's tabs ──
             var sixTabs = new List<MyButtonTabs>();
             for (int i = 0; i < buttonsParent.childCount; i++)
             {
@@ -146,7 +117,7 @@ internal static class NativeSettings
                 if (m != null) sixTabs.Add(m);
             }
 
-            // ── wire tab switching ourselves ──
+            // ── wire tab switching ──
             var ourBtn = ourBtnGo.GetComponent<Button>();
             if (ourBtn != null)
             {
@@ -159,20 +130,65 @@ internal static class NativeSettings
                 if (b != null) b.onClick.AddListener((UnityAction)(() => HideTab(ourTab, mbt)));
             }
 
-            // ── move the finished objects into the live hierarchy ──
+            // ── move into live hierarchy ──
             ourTab.transform.SetParent(settingsMask, false);
-            ourTab.SetActive(false);                          // hidden until our tab is selected
+            ourTab.SetActive(false);
             if (mbt != null) mbt.associatedContent = ourTab;
             ourBtnGo.transform.SetParent(buttonsParent, false);
-            ourBtnGo.SetActive(true);                         // MyButtonTabs Awakes cleanly now
+            ourBtnGo.SetActive(true);
             Object.Destroy(holder);
 
             _ourTab = ourTab;
             _ourMbt = mbt;
+            _contentBuilt = false;
 
-            Log.LogInfo("[CP] Community Patch tab injected.");
+            Log.LogInfo("[CP] Community Patch tab injected (content deferred).");
         }
         catch (System.Exception e) { Log.LogWarning($"[CP] inject failed: {e}"); }
+    }
+
+    // Heavy work: clone rows, build keycaps, scan sprites. Called once on first
+    // tab show instead of at injection time, so the Options screen opens instantly.
+    static void BuildContent()
+    {
+        if (_contentBuilt || _sm == null || _ourTab == null) return;
+        _contentBuilt = true;
+        try
+        {
+            CaptureKeycapFromPrefab(_sm.controlPrefabNew);
+
+            var content = _ourTab.GetComponent<ScrollRect>()?.content;
+            if (content == null) return;
+
+            // ── build a row per hotkey ──
+            _rows = new List<(KeyDisplay, ConfigEntry<KeyCode>)>();
+            foreach (var (label, entry) in Hotkeys.All())
+                BuildRow(_sm.controlPrefabNew, content, label, entry);
+
+            // ── slider rows ──
+            BuildSliderRow(_sm.sliderPrefab, content, "Weapon SFX Volume",
+                () => WeaponSfxVolume.Weapon, v => WeaponSfxVolume.Weapon = v);
+            BuildSliderRow(_sm.sliderPrefab, content, "Hit SFX Volume",
+                () => WeaponSfxVolume.Hit, v => WeaponSfxVolume.Hit = v);
+            BuildSliderRow(_sm.sliderPrefab, content, "Item SFX Volume",
+                () => WeaponSfxVolume.Item, v => WeaponSfxVolume.Item = v);
+            BuildSliderRow(_sm.sliderPrefab, content, "Mod Menu Opacity",
+                () => UiTheme.Opacity, v => UiTheme.Opacity = v);
+
+            // paint keycaps
+            if (_rows != null)
+                foreach (var r in _rows)
+                    try
+                    {
+                        if (r.kd == null) continue;
+                        r.kd.SetKey(r.entry.Value);
+                        ApplyKeycapVisual(r.kd);
+                    }
+                    catch { }
+
+            Log.LogInfo("[CP] Community Patch content built.");
+        }
+        catch (System.Exception e) { Log.LogWarning($"[CP] BuildContent: {e}"); }
     }
 
     // When the Settings window closes, make sure our tab isn't the one left active
@@ -590,6 +606,9 @@ internal static class NativeSettings
     {
         try
         {
+            // First show: do the heavy content build (deferred from injection).
+            BuildContent();
+
             foreach (var g in others)
             {
                 if (g.associatedContent != null) g.associatedContent.SetActive(false);
@@ -676,13 +695,15 @@ internal static class NativeSettings
     }
 }
 
-// Inject when the Options screen is enabled.
-[HarmonyPatch(typeof(Settings), "OnEnable")]
-static class Patch_CPTab_Inject
-{
-    [HarmonyPostfix]
-    static void Postfix(Settings __instance) => NativeSettings.TryInject(__instance);
-}
+    // Inject when the Options screen is enabled. Only creates the tab button
+    // (lightweight). The heavy work (cloning content, building rows, scanning
+    // sprites) is deferred to ShowTab when the user actually clicks the Mod tab.
+    [HarmonyPatch(typeof(Settings), "OnEnable")]
+    static class Patch_CPTab_Inject
+    {
+        [HarmonyPostfix]
+        static void Postfix(Settings __instance) => NativeSettings.TryInject(__instance);
+    }
 
 // Reset our tab state when the Settings window closes.
 [HarmonyPatch(typeof(Settings), "OnDisable")]

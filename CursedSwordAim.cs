@@ -87,7 +87,6 @@ static class Patch_CursedSwordAim
             if (target == null) return;                          // nothing in range → leave facing
 
             Vector3 dir = target.GetCenterPosition() - origin;
-            dir.y = 0f;                                          // keep the swing level
             if (dir.sqrMagnitude < 0.0001f) return;              // enemy on top of us
             dir.Normalize();
 
